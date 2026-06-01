@@ -1,0 +1,125 @@
+{
+  "db_id": "university_registration",
+  "description": "Synthetic university course registration schema for multi-turn Text-to-SQL.",
+  "tables": {
+    "departments": [
+      "department_id",
+      "department_name"
+    ],
+    "majors": [
+      "major_id",
+      "major_name",
+      "department_id"
+    ],
+    "students": [
+      "student_id",
+      "full_name",
+      "cohort_year",
+      "gender",
+      "major_id",
+      "gpa"
+    ],
+    "instructors": [
+      "instructor_id",
+      "full_name",
+      "department_id"
+    ],
+    "courses": [
+      "course_id",
+      "course_code",
+      "course_name",
+      "credits",
+      "department_id"
+    ],
+    "semesters": [
+      "semester_id",
+      "semester_name",
+      "academic_year",
+      "term"
+    ],
+    "course_sections": [
+      "section_id",
+      "section_code",
+      "course_id",
+      "semester_id",
+      "instructor_id",
+      "room",
+      "capacity",
+      "schedule"
+    ],
+    "enrollments": [
+      "enrollment_id",
+      "student_id",
+      "section_id",
+      "status",
+      "registered_at",
+      "grade"
+    ],
+    "prerequisites": [
+      "course_id",
+      "prerequisite_course_id"
+    ],
+    "waitlists": [
+      "waitlist_id",
+      "student_id",
+      "section_id",
+      "priority",
+      "status",
+      "requested_at"
+    ]
+  },
+  "foreign_keys": [
+    [
+      "majors.department_id",
+      "departments.department_id"
+    ],
+    [
+      "students.major_id",
+      "majors.major_id"
+    ],
+    [
+      "instructors.department_id",
+      "departments.department_id"
+    ],
+    [
+      "courses.department_id",
+      "departments.department_id"
+    ],
+    [
+      "course_sections.course_id",
+      "courses.course_id"
+    ],
+    [
+      "course_sections.semester_id",
+      "semesters.semester_id"
+    ],
+    [
+      "course_sections.instructor_id",
+      "instructors.instructor_id"
+    ],
+    [
+      "enrollments.student_id",
+      "students.student_id"
+    ],
+    [
+      "enrollments.section_id",
+      "course_sections.section_id"
+    ],
+    [
+      "prerequisites.course_id",
+      "courses.course_id"
+    ],
+    [
+      "prerequisites.prerequisite_course_id",
+      "courses.course_id"
+    ],
+    [
+      "waitlists.student_id",
+      "students.student_id"
+    ],
+    [
+      "waitlists.section_id",
+      "course_sections.section_id"
+    ]
+  ]
+}
