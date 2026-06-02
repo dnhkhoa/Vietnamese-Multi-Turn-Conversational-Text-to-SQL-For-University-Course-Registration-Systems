@@ -1,0 +1,11 @@
+  .venv/
+  myEnv/
+  __pycache__/
+  .pytest_cache/
+  *.log
+  .env
+  *.sqlite-journal
+  .ipynb_checkpoints/
+
+# temporary, with remove from gitignore later
+notebooks 
