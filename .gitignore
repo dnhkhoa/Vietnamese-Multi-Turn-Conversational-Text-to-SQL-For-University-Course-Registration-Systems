@@ -1,0 +1,8 @@
+  .venv/
+  myEnv/
+  __pycache__/
+  .pytest_cache/
+  *.log
+  .env
+  *.sqlite-journal
+  .ipynb_checkpoints/
