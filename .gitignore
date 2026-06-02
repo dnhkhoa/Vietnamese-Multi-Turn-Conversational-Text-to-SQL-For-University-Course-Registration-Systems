@@ -6,3 +6,6 @@
   .env
   *.sqlite-journal
   .ipynb_checkpoints/
+
+# temporary, with remove from gitignore later
+notebooks 
