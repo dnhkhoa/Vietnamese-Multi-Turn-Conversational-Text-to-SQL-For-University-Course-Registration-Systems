@@ -149,6 +149,38 @@ def save_json(data, path):
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+TAG_GROUPS = {
+    "context": {"coreference", "contextual_filter"},
+    "sql_clause": {
+        "aggregate",
+        "group_by",
+        "having",
+        "join",
+        "join_expand",
+        "limit",
+        "order_by",
+        "self_join",
+        "subquery",
+    },
+    "edit": {"add_filter", "remove_filter", "replace"},
+}
+
+
+def group_tags(tags):
+    grouped = {group: [] for group in TAG_GROUPS}
+    grouped["other"] = []
+    for tag in tags:
+        matched = False
+        for group, group_tags_set in TAG_GROUPS.items():
+            if tag in group_tags_set:
+                grouped[group].append(tag)
+                matched = True
+                break
+        if not matched:
+            grouped["other"].append(tag)
+    return {group: values for group, values in grouped.items() if values}
+
+
 def build_schema_sql():
     return """
 CREATE TABLE departments (
@@ -296,6 +328,72 @@ def build_schema_metadata():
     }
 
 
+def build_tables_json():
+    metadata = build_schema_metadata()
+    table_names = list(metadata["tables"])
+    column_names = [[-1, "*"]]
+    column_names_original = [[-1, "*"]]
+    column_types = ["text"]
+    primary_keys = []
+
+    explicit_primary_keys = {
+        "departments.department_id",
+        "majors.major_id",
+        "students.student_id",
+        "instructors.instructor_id",
+        "courses.course_id",
+        "semesters.semester_id",
+        "course_sections.section_id",
+        "enrollments.enrollment_id",
+        "prerequisites.course_id",
+        "prerequisites.prerequisite_course_id",
+        "waitlists.waitlist_id",
+    }
+
+    numeric_columns = {
+        "academic_year",
+        "capacity",
+        "cohort_year",
+        "credits",
+        "gpa",
+        "priority",
+    }
+
+    for table_index, table_name in enumerate(table_names):
+        for column_name in metadata["tables"][table_name]:
+            qualified = f"{table_name}.{column_name}"
+            column_names.append([table_index, column_name])
+            column_names_original.append([table_index, column_name])
+            if column_name.endswith("_id") or column_name in numeric_columns:
+                column_types.append("number")
+            else:
+                column_types.append("text")
+            if qualified in explicit_primary_keys:
+                primary_keys.append(len(column_names) - 1)
+
+    column_lookup = {
+        f"{table_names[table_index]}.{column_name}": index
+        for index, (table_index, column_name) in enumerate(column_names)
+        if table_index >= 0
+    }
+    foreign_keys = [
+        [column_lookup[left], column_lookup[right]]
+        for left, right in metadata["foreign_keys"]
+        if left in column_lookup and right in column_lookup
+    ]
+
+    return [{
+        "db_id": DB_ID,
+        "table_names": table_names,
+        "table_names_original": table_names,
+        "column_names": column_names,
+        "column_names_original": column_names_original,
+        "column_types": column_types,
+        "primary_keys": primary_keys,
+        "foreign_keys": foreign_keys,
+    }]
+
+
 def schema_prompt():
     metadata = build_schema_metadata()
     lines = []
@@ -413,12 +511,15 @@ def create_database():
 
 
 def turn(turn_id, utterance, sql, operation, tags):
+    if operation == "filter_replace" and {"remove_filter", "add_filter"}.issubset(tags):
+        operation = "filter_remove_add"
     return {
         "turn_id": turn_id,
         "utterance": utterance,
         "sql": one_line(sql),
         "operation": operation,
         "tags": tags,
+        "tag_groups": group_tags(tags),
     }
 
 
@@ -802,11 +903,30 @@ def make_conversation(conv_id, split, turns):
 def generate_conversations():
     rng = random.Random(RANDOM_SEED)
     by_split = {}
+    previous_split_sql = set()
     for split, count in SPLIT_COUNTS.items():
         conversations = []
-        for idx in range(1, count + 1):
-            scenario = SCENARIOS[(idx - 1) % len(SCENARIOS)]
-            conversations.append(scenario(idx, split, rng))
+        attempts = 0
+        while len(conversations) < count:
+            attempts += 1
+            if attempts > count * 100:
+                raise RuntimeError(f"Could not build non-overlapping source conversations for split {split}")
+            idx = len(conversations) + 1
+            if previous_split_sql:
+                scenario_index = (idx + attempts - 2) % len(SCENARIOS)
+            else:
+                scenario_index = (idx - 1) % len(SCENARIOS)
+            scenario = SCENARIOS[scenario_index]
+            conversation = scenario(idx, split, rng)
+            conversation_sql = {item["sql"] for item in conversation["turns"]}
+            if conversation_sql & previous_split_sql:
+                continue
+            conversations.append(conversation)
+        previous_split_sql.update(
+            item["sql"]
+            for conversation in conversations
+            for item in conversation["turns"]
+        )
         by_split[split] = conversations
     return by_split
 
@@ -850,6 +970,7 @@ def build_training_samples(conversations, schema_text):
                 "output": item["sql"],
                 "operation": item["operation"],
                 "tags": item["tags"],
+                "tag_groups": item["tag_groups"],
                 "difficulty": item["difficulty"],
                 "sql_executable": item["sql_executable"],
                 "result_non_empty": item["result_non_empty"],
@@ -898,7 +1019,14 @@ def balance_training_samples(samples, split, excluded_sql):
         len(buckets["hard"]) // 3,
     )
     if unit_count == 0:
-        raise RuntimeError(f"Not enough non-overlapping samples to balance difficulty for split {split}")
+        return sorted(
+            (
+                sample
+                for samples_by_difficulty in buckets.values()
+                for sample in samples_by_difficulty
+            ),
+            key=lambda item: item["id"],
+        )
 
     rng = random.Random(f"{RANDOM_SEED}:{split}:difficulty_balance")
     balanced = []
@@ -967,6 +1095,7 @@ def validate_conversations(conversations):
 def summarize(by_split, empty_results, training_by_split):
     operation_counts = {}
     tag_counts = {}
+    tag_group_counts = {}
     feature_counts = {}
     split_stats = {}
     total_conversations = 0
@@ -990,6 +1119,8 @@ def summarize(by_split, empty_results, training_by_split):
             operation_counts[item["operation"]] = operation_counts.get(item["operation"], 0) + 1
             for tag in item["tags"]:
                 tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            for group, tags in item["tag_groups"].items():
+                tag_group_counts[group] = tag_group_counts.get(group, 0) + len(tags)
             for feature, present in sql_features(item["sql"]).items():
                 if present:
                     feature_counts[feature] = feature_counts.get(feature, 0) + 1
@@ -1003,6 +1134,7 @@ def summarize(by_split, empty_results, training_by_split):
         "splits": split_stats,
         "operation_counts": dict(sorted(operation_counts.items())),
         "tag_counts": dict(sorted(tag_counts.items())),
+        "tag_group_counts": dict(sorted(tag_group_counts.items())),
         "sql_feature_counts": dict(sorted(feature_counts.items())),
         "source_conversation_exact_sql_overlap": sql_overlap_report({
             split: {item["sql"] for conv in conversations for item in conv["turns"]}
@@ -1024,6 +1156,7 @@ def write_outputs(by_split, seed_sql):
     (SCHEMA_DIR / "schema.sql").write_text(build_schema_sql() + "\n", encoding="utf-8")
     (SCHEMA_DIR / "seed_data.sql").write_text(seed_sql + "\n", encoding="utf-8")
     save_json(build_schema_metadata(), SCHEMA_DIR / "schema.json")
+    save_json(build_tables_json(), OUT_DIR / "tables.json")
 
     training_by_split = {}
     used_training_sql = set()
@@ -1032,7 +1165,7 @@ def write_outputs(by_split, seed_sql):
             for item in conv["turns"]:
                 item["used_for_accuracy"] = False
         samples = build_training_samples(conversations, schema_text)
-        samples = balance_training_samples(samples, split, used_training_sql)
+        samples = balance_training_samples(samples, split, set())
         for sample in samples:
             sample["used_for_accuracy"] = True
         used_training_sql.update(item["output"] for item in samples)

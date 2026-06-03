@@ -1,87 +1,109 @@
 {
-  "dataset": "university_multi_turn_v02_clean_training",
+  "dataset": "university_multi_turn_v02",
   "db_id": "university_registration",
+  "total_conversations": 650,
+  "total_turns": 3651,
+  "empty_result_queries": 423,
   "splits": {
     "train": {
-      "training_samples": 1160,
-      "difficulty_counts": {
-        "easy": 348,
-        "hard": 348,
-        "medium": 464
+      "conversations": 500,
+      "turns": 2813,
+      "avg_turns": 5.63,
+      "min_turns": 5,
+      "max_turns": 6,
+      "turn_difficulty_counts": {
+        "easy": 690,
+        "hard": 496,
+        "medium": 1627
       },
-      "difficulty_percentages": {
-        "easy": 30.0,
-        "hard": 30.0,
-        "medium": 40.0
-      },
-      "duplicate_exact_inputs": 0,
-      "duplicate_exact_sql_outputs": 0
+      "balanced_training_samples": 1650,
+      "balanced_training_difficulty_counts": {
+        "easy": 495,
+        "hard": 495,
+        "medium": 660
+      }
     },
     "dev": {
-      "training_samples": 180,
-      "difficulty_counts": {
-        "easy": 54,
-        "hard": 54,
-        "medium": 72
+      "conversations": 75,
+      "turns": 427,
+      "avg_turns": 5.69,
+      "min_turns": 5,
+      "max_turns": 6,
+      "turn_difficulty_counts": {
+        "easy": 190,
+        "medium": 237
       },
-      "difficulty_percentages": {
-        "easy": 30.0,
-        "hard": 30.0,
-        "medium": 40.0
-      },
-      "duplicate_exact_inputs": 0,
-      "duplicate_exact_sql_outputs": 0
+      "balanced_training_samples": 427,
+      "balanced_training_difficulty_counts": {
+        "easy": 190,
+        "medium": 237
+      }
     },
     "test": {
-      "training_samples": 160,
-      "difficulty_counts": {
-        "easy": 48,
-        "hard": 48,
-        "medium": 64
+      "conversations": 75,
+      "turns": 411,
+      "avg_turns": 5.48,
+      "min_turns": 5,
+      "max_turns": 6,
+      "turn_difficulty_counts": {
+        "easy": 135,
+        "medium": 276
       },
-      "difficulty_percentages": {
-        "easy": 30.0,
-        "hard": 30.0,
-        "medium": 40.0
-      },
-      "duplicate_exact_inputs": 0,
-      "duplicate_exact_sql_outputs": 0
+      "balanced_training_samples": 411,
+      "balanced_training_difficulty_counts": {
+        "easy": 135,
+        "medium": 276
+      }
     }
   },
   "operation_counts": {
-    "aggregate_group_by": 150,
-    "filter_add": 313,
-    "filter_replace": 218,
-    "having_add": 204,
-    "initial_query": 128,
-    "join_expand": 117,
-    "limit_add": 106,
-    "order_add": 264
+    "aggregate_group_by": 416,
+    "filter_add": 775,
+    "filter_remove_add": 110,
+    "filter_replace": 401,
+    "having_add": 353,
+    "initial_query": 451,
+    "join_expand": 172,
+    "limit_add": 323,
+    "order_add": 650
   },
   "tag_counts": {
-    "add_filter": 52,
-    "aggregate": 118,
-    "contextual_filter": 280,
-    "coreference": 242,
-    "group_by": 173,
-    "having": 232,
-    "join": 205,
-    "join_expand": 41,
-    "limit": 106,
-    "order_by": 264,
-    "remove_filter": 52,
-    "replace": 166,
-    "self_join": 7,
-    "subquery": 64
+    "add_filter": 110,
+    "aggregate": 291,
+    "contextual_filter": 605,
+    "coreference": 526,
+    "group_by": 540,
+    "having": 540,
+    "join": 698,
+    "join_expand": 124,
+    "limit": 323,
+    "order_by": 650,
+    "remove_filter": 110,
+    "replace": 401,
+    "self_join": 62,
+    "subquery": 62
+  },
+  "tag_group_counts": {
+    "context": 1131,
+    "edit": 621,
+    "sql_clause": 3290
   },
   "sql_feature_counts": {
-    "aggregate": 888,
-    "group_by": 888,
-    "having": 653,
-    "join": 1500,
-    "limit": 106,
-    "order_by": 370,
-    "subquery": 450
+    "aggregate": 2402,
+    "group_by": 2402,
+    "having": 1777,
+    "join": 3651,
+    "limit": 323,
+    "order_by": 973,
+    "subquery": 496
+  },
+  "source_conversation_exact_sql_overlap": {
+    "pair_counts": {
+      "train-dev": 0,
+      "train-test": 0,
+      "dev-test": 0
+    },
+    "max_pair_overlap": 0
   },
   "accuracy_split_exact_sql_overlap": {
     "pair_counts": {
@@ -90,35 +112,5 @@
       "dev-test": 0
     },
     "max_pair_overlap": 0
-  },
-  "accuracy_split_exact_input_overlap": {
-    "pair_counts": {
-      "train-dev": 0,
-      "train-test": 0,
-      "dev-test": 0
-    },
-    "max_pair_overlap": 0
-  },
-  "released_files": {
-    "schema": [
-      "schema.json",
-      "schema.sql",
-      "seed_data.sql"
-    ],
-    "database": [
-      "university_registration.sqlite"
-    ],
-    "training": [
-      "university_train_format_train_v02.json",
-      "university_train_format_dev_v02.json",
-      "university_train_format_test_v02.json"
-    ]
-  },
-  "cleaning_notes": [
-    "Removed old v01/simple artifacts and source conversation exports.",
-    "Training splits are deduplicated by exact full input and exact SQL output.",
-    "Exact full input and exact SQL overlap across train/dev/test is zero.",
-    "Difficulty ratio is 30% easy, 40% medium, 30% hard in every split."
-  ],
-  "total_training_samples": 1500
+  }
 }
