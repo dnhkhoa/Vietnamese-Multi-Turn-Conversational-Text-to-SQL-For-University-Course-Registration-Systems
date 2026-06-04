@@ -1,3 +1,22 @@
 .venv/
 __pycache__/
 *.py[cod]
+
+# Local fine-tuning environments and artifacts
+viedu-unsloth-local/.venv/
+viedu-unsloth-local/data/raw/*
+viedu-unsloth-local/data/cache/*
+viedu-unsloth-local/data/processed/*.jsonl
+viedu-unsloth-local/data/processed/skipped_rows.jsonl
+viedu-unsloth-local/outputs/adapters/*
+viedu-unsloth-local/outputs/predictions/*
+viedu-unsloth-local/outputs/eval/*
+viedu-unsloth-local/outputs/logs/*
+
+!viedu-unsloth-local/data/raw/.gitkeep
+!viedu-unsloth-local/data/cache/.gitkeep
+!viedu-unsloth-local/data/processed/.gitkeep
+!viedu-unsloth-local/outputs/adapters/.gitkeep
+!viedu-unsloth-local/outputs/predictions/.gitkeep
+!viedu-unsloth-local/outputs/eval/.gitkeep
+!viedu-unsloth-local/outputs/logs/.gitkeep
