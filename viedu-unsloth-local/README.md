@@ -35,6 +35,10 @@ pip install -r requirements.txt
 
 If Unsloth or bitsandbytes fails on native Windows, use WSL2 with CUDA. Dataset preparation and SQL evaluation can run without CUDA.
 
+## Colab Unsloth
+
+Use [viedu_unsloth_colab_qwen3b.ipynb](notebooks/viedu_unsloth_colab_qwen3b.ipynb) to train the same direct-SQL baseline with Unsloth on Google Colab. The notebook installs Unsloth, clones this repo, prepares SFT JSONL, runs a 20-step sanity train, and can run full Qwen 2.5 Coder 3B LoRA training.
+
 ## Workflow
 
 Set your dataset path first. For this repo, the current processed dataset is one level up:
