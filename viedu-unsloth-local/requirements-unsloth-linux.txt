@@ -1,0 +1,13 @@
+torch
+transformers
+datasets
+trl
+peft
+accelerate
+bitsandbytes
+unsloth
+pyyaml
+tqdm
+sqlparse
+sentencepiece
+protobuf

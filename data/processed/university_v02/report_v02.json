@@ -1,0 +1,116 @@
+{
+  "dataset": "university_multi_turn_v02",
+  "db_id": "university_registration",
+  "total_conversations": 650,
+  "total_turns": 3651,
+  "empty_result_queries": 423,
+  "splits": {
+    "train": {
+      "conversations": 500,
+      "turns": 2813,
+      "avg_turns": 5.63,
+      "min_turns": 5,
+      "max_turns": 6,
+      "turn_difficulty_counts": {
+        "easy": 690,
+        "hard": 496,
+        "medium": 1627
+      },
+      "balanced_training_samples": 1650,
+      "balanced_training_difficulty_counts": {
+        "easy": 495,
+        "hard": 495,
+        "medium": 660
+      }
+    },
+    "dev": {
+      "conversations": 75,
+      "turns": 427,
+      "avg_turns": 5.69,
+      "min_turns": 5,
+      "max_turns": 6,
+      "turn_difficulty_counts": {
+        "easy": 190,
+        "medium": 237
+      },
+      "balanced_training_samples": 427,
+      "balanced_training_difficulty_counts": {
+        "easy": 190,
+        "medium": 237
+      }
+    },
+    "test": {
+      "conversations": 75,
+      "turns": 411,
+      "avg_turns": 5.48,
+      "min_turns": 5,
+      "max_turns": 6,
+      "turn_difficulty_counts": {
+        "easy": 135,
+        "medium": 276
+      },
+      "balanced_training_samples": 411,
+      "balanced_training_difficulty_counts": {
+        "easy": 135,
+        "medium": 276
+      }
+    }
+  },
+  "operation_counts": {
+    "aggregate_group_by": 416,
+    "filter_add": 775,
+    "filter_remove_add": 110,
+    "filter_replace": 401,
+    "having_add": 353,
+    "initial_query": 451,
+    "join_expand": 172,
+    "limit_add": 323,
+    "order_add": 650
+  },
+  "tag_counts": {
+    "add_filter": 110,
+    "aggregate": 291,
+    "contextual_filter": 605,
+    "coreference": 526,
+    "group_by": 540,
+    "having": 540,
+    "join": 698,
+    "join_expand": 124,
+    "limit": 323,
+    "order_by": 650,
+    "remove_filter": 110,
+    "replace": 401,
+    "self_join": 62,
+    "subquery": 62
+  },
+  "tag_group_counts": {
+    "context": 1131,
+    "edit": 621,
+    "sql_clause": 3290
+  },
+  "sql_feature_counts": {
+    "aggregate": 2402,
+    "group_by": 2402,
+    "having": 1777,
+    "join": 3651,
+    "limit": 323,
+    "order_by": 973,
+    "subquery": 496
+  },
+  "source_conversation_exact_sql_overlap": {
+    "pair_counts": {
+      "train-dev": 0,
+      "train-test": 0,
+      "dev-test": 0
+    },
+    "max_pair_overlap": 0
+  },
+  "accuracy_split_exact_sql_overlap": {
+    "pair_counts": {
+      "train-dev": 0,
+      "train-test": 0,
+      "dev-test": 0
+    },
+    "max_pair_overlap": 0
+  }
+}
