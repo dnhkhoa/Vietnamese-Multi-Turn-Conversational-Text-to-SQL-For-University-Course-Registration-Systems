@@ -1,0 +1,6 @@
+numpy>=1.26,<2
+pandas==2.2.3
+streamlit==1.37.1
+rapidfuzz>=3.9,<4
+PyYAML>=6.0,<7
+pytest>=8.3,<9

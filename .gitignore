@@ -1,6 +1,16 @@
 .venv/
+myEnv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+*.log
+.env
+*.sqlite-journal
+.ipynb_checkpoints/
+*.zip
+
+# Temporary, remove from gitignore later.
+notebooks
 
 # Local fine-tuning environments and artifacts
 viedu-unsloth-local/.venv/
@@ -20,3 +30,6 @@ viedu-unsloth-local/outputs/logs/*
 !viedu-unsloth-local/outputs/predictions/.gitkeep
 !viedu-unsloth-local/outputs/eval/.gitkeep
 !viedu-unsloth-local/outputs/logs/.gitkeep
+
+# Root duplicate from Colab; canonical notebook is under viedu-unsloth-local/notebooks.
+/viedu_unsloth_colab_qwen3b.ipynb
