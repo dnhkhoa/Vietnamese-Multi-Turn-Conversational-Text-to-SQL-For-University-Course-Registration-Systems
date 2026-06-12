@@ -17,12 +17,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.business_rules import DEFAULT_DB_PATH
+from src.llm_state_parser import ParsedState
 from src.nl2sql_engine import COURSE_ALIASES, MAJOR_ALIASES, VietnameseNL2SQLEngine
 
 
 DEFAULT_SYNTHETIC_OUTPUT = PROJECT_ROOT / "data" / "synthetic_eval.jsonl"
 DEFAULT_MANUAL_OUTPUT = PROJECT_ROOT / "data" / "manual_labeled_eval.jsonl"
 DEFAULT_QWEN_OUTPUT = PROJECT_ROOT / "data" / "qwen_state_tracking_train.jsonl"
+DEFAULT_STATE_EVAL_OUTPUT = PROJECT_ROOT / "data" / "state_tracking_eval_v02.jsonl"
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class CatalogData:
     majors: Sequence[MajorRef]
     students: Sequence[str]
     offerings: Sequence[str]
+    prerequisite_course_ids: Sequence[str]
 
 
 def load_catalog(db_path: Path) -> CatalogData:
@@ -75,9 +78,25 @@ def load_catalog(db_path: Path) -> CatalogData:
             )
         ]
         offerings = [row[0] for row in conn.execute("SELECT MaLHP FROM LopHP ORDER BY MaLHP LIMIT 240")]
+        prerequisite_course_ids = [
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT DISTINCT MaMH
+                FROM TienQuyet
+                ORDER BY MaMH
+                """
+            )
+        ]
     finally:
         conn.close()
-    return CatalogData(courses=courses, majors=majors, students=students, offerings=offerings)
+    return CatalogData(
+        courses=courses,
+        majors=majors,
+        students=students,
+        offerings=offerings,
+        prerequisite_course_ids=prerequisite_course_ids,
+    )
 
 
 def dedupe(values: Iterable[str]) -> List[str]:
@@ -105,6 +124,30 @@ def compact_df(df: pd.DataFrame, max_rows: int = 2) -> List[Dict[str, Any]]:
     if df.empty:
         return []
     return df.head(max_rows).fillna("").to_dict(orient="records")
+
+
+def df_records(df: pd.DataFrame, max_rows: int) -> List[Dict[str, Any]]:
+    if df.empty:
+        return []
+    return df.head(max_rows).fillna("").to_dict(orient="records")
+
+
+class ExpectedStateParser:
+    def __init__(self) -> None:
+        self._states: List[Dict[str, Any]] = []
+
+    def set_states(self, states: Sequence[Dict[str, Any]]) -> None:
+        self._states = [dict(state) for state in states]
+
+    def parse(self, utterance: str, previous_state: Dict[str, Any]) -> ParsedState:
+        if not self._states:
+            raise RuntimeError("ExpectedStateParser has no state queued")
+        state = self._states.pop(0)
+        return ParsedState(
+            intent=state["intent"],
+            edit_operation=state["edit_operation"],
+            slots=dict(state.get("slots", {})),
+        )
 
 
 def turn(
@@ -139,6 +182,19 @@ def slots_with(base: Dict[str, Any], **updates: Any) -> Dict[str, Any]:
 def alias(ref: CourseRef | MajorRef, rng: random.Random) -> str:
     candidates = list(ref.aliases)
     return rng.choice(candidates[: min(len(candidates), 8)])
+
+
+def course_by_id(catalog: CatalogData, ma_mh: str) -> CourseRef:
+    for course in catalog.courses:
+        if course.ma_mh == ma_mh:
+            return course
+    return catalog.courses[0]
+
+
+def prerequisite_course(catalog: CatalogData, rng: random.Random) -> CourseRef:
+    if catalog.prerequisite_course_ids:
+        return course_by_id(catalog, rng.choice(catalog.prerequisite_course_ids))
+    return rng.choice(catalog.courses)
 
 
 def synthetic_offer_schedule(idx: int, rng: random.Random, catalog: CatalogData) -> Dict[str, Any]:
@@ -339,6 +395,123 @@ def synthetic_registration_lookup(idx: int, rng: random.Random, catalog: Catalog
     )
 
 
+def synthetic_context_switch(idx: int, rng: random.Random, catalog: CatalogData) -> Dict[str, Any]:
+    student = rng.choice(catalog.students)
+    other_student = rng.choice([value for value in catalog.students if value != student])
+    first_course = prerequisite_course(catalog, rng)
+    second_course = rng.choice([course for course in catalog.courses if course.ma_mh != first_course.ma_mh])
+    semester = rng.choice([1, 2])
+    return dialogue(
+        f"syn_context_switch_{idx:05d}",
+        "stateful_context_switch_v02",
+        [
+            turn(
+                rng.choice([
+                    f"Em là sinh viên {student}, em học được môn {alias(first_course, rng)} chưa?",
+                    f"Kiểm tra giúp {student} có đăng ký được {alias(first_course, rng)} không.",
+                    f"Với hồ sơ của sinh viên {student}, môn {alias(first_course, rng)} có đăng ký được không?",
+                ]),
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "NEW_QUERY",
+                {"MaSV": student, "MaMH": first_course.ma_mh},
+            ),
+            turn(
+                rng.choice([
+                    f"Vậy đổi sang môn {alias(second_course, rng)} thì sao?",
+                    f"Nếu thay bằng {alias(second_course, rng)} thì kết quả thế nào?",
+                    f"Còn {alias(second_course, rng)} thì sinh viên này học được không?",
+                ]),
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "CHANGE_ENTITY",
+                {"MaSV": student, "MaMH": second_course.ma_mh},
+            ),
+            turn(
+                f"Thử kiểm tra cùng môn đó cho sinh viên {other_student}.",
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "CHANGE_ENTITY",
+                {"MaSV": other_student, "MaMH": second_course.ma_mh},
+            ),
+            turn(
+                rng.choice([
+                    f"Quay lại sinh viên {student}, chỉ xét học kỳ {semester}.",
+                    f"Vẫn là bạn {student}, lọc học kỳ {semester} thôi.",
+                ]),
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "REPLACE_FILTER",
+                {"MaSV": student, "MaMH": second_course.ma_mh, "HocKy": semester},
+            ),
+            turn(
+                "Quay lại môn ban đầu, bạn đó còn thiếu tiên quyết gì?",
+                "PREREQUISITE_LOOKUP",
+                "CHANGE_INTENT",
+                {"MaSV": student, "MaMH": first_course.ma_mh, "PrereqDirection": "PREREQUISITES_OF"},
+            ),
+            turn(
+                "Còn những môn bạn đó đã qua thì liệt kê lại.",
+                "STUDENT_RESULT_LOOKUP",
+                "CHANGE_INTENT",
+                {"MaSV": student, "KetQua": "DAT"},
+            ),
+        ],
+    )
+
+
+def synthetic_student_profile_advising(idx: int, rng: random.Random, catalog: CatalogData) -> Dict[str, Any]:
+    student = rng.choice(catalog.students)
+    target_course = prerequisite_course(catalog, rng)
+    semester = rng.choice([2, 3, 4, 5])
+    return dialogue(
+        f"syn_profile_advising_{idx:05d}",
+        "student_profile_advising_v02",
+        [
+            turn(
+                rng.choice([
+                    f"Mình là MSSV {student}, cho mình xem ngành và chương trình đào tạo.",
+                    f"Hồ sơ sinh viên {student} đang theo ngành nào và CTĐT nào?",
+                    f"Tra cứu profile học tập của sinh viên {student}.",
+                ]),
+                "STUDENT_INFO_LOOKUP",
+                "NEW_QUERY",
+                {"MaSV": student},
+            ),
+            turn(
+                f"Theo CTĐT của mình, học kỳ {semester} nên học những môn nào?",
+                "CURRICULUM_COURSE_SEARCH",
+                "RESOLVE_REFERENCE",
+                {"MaSV": student, "HocKy": semester},
+            ),
+            turn(
+                "Chỉ lấy các môn bắt buộc trong danh sách đó.",
+                "CURRICULUM_COURSE_SEARCH",
+                "ADD_FILTER",
+                {"MaSV": student, "HocKy": semester, "LoaiYC": "BAT_BUOC"},
+            ),
+            turn(
+                rng.choice([
+                    f"Với kết quả học tập hiện tại, mình học được {alias(target_course, rng)} chưa?",
+                    f"Mình có đủ điều kiện đăng ký môn {alias(target_course, rng)} không?",
+                    f"Xem giúp mình môn {alias(target_course, rng)} có bị thiếu tiên quyết không.",
+                ]),
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "CHANGE_INTENT",
+                {"MaSV": student, "MaMH": target_course.ma_mh},
+            ),
+            turn(
+                "Nếu chưa được thì thiếu môn tiên quyết nào?",
+                "PREREQUISITE_LOOKUP",
+                "RESOLVE_REFERENCE",
+                {"MaSV": student, "MaMH": target_course.ma_mh, "PrereqDirection": "PREREQUISITES_OF"},
+            ),
+            turn(
+                "Cho xem các môn mình đã đạt để đối chiếu.",
+                "STUDENT_RESULT_LOOKUP",
+                "CHANGE_INTENT",
+                {"MaSV": student, "KetQua": "DAT"},
+            ),
+        ],
+    )
+
+
 SYNTHETIC_FACTORIES: Sequence[Callable[[int, random.Random, CatalogData], Dict[str, Any]]] = [
     synthetic_offer_schedule,
     synthetic_course_info,
@@ -347,6 +520,8 @@ SYNTHETIC_FACTORIES: Sequence[Callable[[int, random.Random, CatalogData], Dict[s
     synthetic_eligibility,
     synthetic_statistics,
     synthetic_registration_lookup,
+    synthetic_context_switch,
+    synthetic_student_profile_advising,
 ]
 
 
@@ -423,28 +598,43 @@ def enrich_dialogues(
     dialogues: Sequence[Dict[str, Any]],
     db_path: Path,
     include_result_hash: bool,
+    expected_result_max_rows: int,
     progress_label: str,
 ) -> List[Dict[str, Any]]:
-    engine = VietnameseNL2SQLEngine(db_path)
+    state_parser = ExpectedStateParser()
+    engine = VietnameseNL2SQLEngine(db_path, state_parser=state_parser, parser_mode="hybrid")
     enriched = []
     try:
         for idx, item in enumerate(dialogues, start=1):
             engine.reset()
+            state_parser.set_states(
+                {
+                    "intent": item_turn["intent"],
+                    "edit_operation": item_turn["edit_operation"],
+                    "slots": item_turn["slots"],
+                }
+                for item_turn in item["turns"]
+            )
             turns = []
             for item_turn in item["turns"]:
                 result = engine.ask(item_turn["utterance"])
+                result_hash = df_hash(result.dataframe)
                 baseline = {
                     "intent": result.intent,
                     "edit_operation": result.edit_operation,
                     "slots": result.slots,
                     "sql": result.sql,
+                    "sql_kind": "business_rule" if result.sql and result.sql.startswith("-- business_rules.") else "sql",
                     "params": result.params,
                     "row_count": len(result.dataframe),
                     "columns": list(result.dataframe.columns),
                     "preview_rows": compact_df(result.dataframe),
+                    "expected_rows": df_records(result.dataframe, expected_result_max_rows),
+                    "expected_rows_truncated": len(result.dataframe) > expected_result_max_rows,
+                    "result_hash": result_hash,
                 }
                 if include_result_hash:
-                    baseline["result_hash"] = df_hash(result.dataframe)
+                    baseline["result_hash"] = result_hash
                 turns.append({**item_turn, "baseline": baseline})
             enriched.append({**item, "turns": turns})
             if idx % 1000 == 0:
@@ -489,6 +679,43 @@ def qwen_messages_from_dialogues(dialogues: Iterable[Dict[str, Any]]) -> List[Di
     return examples
 
 
+def state_eval_rows_from_dialogues(dialogues: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows = []
+    for item in dialogues:
+        previous_state: Dict[str, Any] = {}
+        for turn_index, item_turn in enumerate(item["turns"], start=1):
+            expected_state = {
+                "intent": item_turn["intent"],
+                "edit_operation": item_turn["edit_operation"],
+                "slots": item_turn["slots"],
+            }
+            baseline = item_turn.get("baseline", {})
+            rows.append(
+                {
+                    "id": f"{item['dialogue_id']}_turn_{turn_index:02d}",
+                    "dialogue_id": item["dialogue_id"],
+                    "turn_id": turn_index,
+                    "db_id": item["db_id"],
+                    "source": item["source"],
+                    "previous_state": previous_state,
+                    "user_question": item_turn["utterance"],
+                    "expected_state": expected_state,
+                    "gold_sql": baseline.get("sql"),
+                    "gold_sql_kind": baseline.get("sql_kind", "sql"),
+                    "gold_params": baseline.get("params", {}),
+                    "expected_result": {
+                        "columns": baseline.get("columns", []),
+                        "rows": baseline.get("expected_rows", []),
+                        "rows_truncated": baseline.get("expected_rows_truncated", False),
+                        "row_count": baseline.get("row_count", 0),
+                        "result_hash": baseline.get("result_hash"),
+                    },
+                }
+            )
+            previous_state = expected_state
+    return rows
+
+
 def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
@@ -506,9 +733,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_SYNTHETIC_OUTPUT)
     parser.add_argument("--manual-output", type=Path, default=DEFAULT_MANUAL_OUTPUT)
     parser.add_argument("--qwen-output", type=Path, default=DEFAULT_QWEN_OUTPUT)
+    parser.add_argument("--state-eval-output", type=Path, default=DEFAULT_STATE_EVAL_OUTPUT)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--target-turns", type=int, default=30000)
     parser.add_argument("--manual-turns", type=int, default=500)
+    parser.add_argument("--expected-result-max-rows", type=int, default=100)
     parser.add_argument("--include-result-hash", action="store_true")
     args = parser.parse_args()
 
@@ -521,22 +750,26 @@ def main() -> None:
         synthetic,
         args.db,
         include_result_hash=args.include_result_hash,
+        expected_result_max_rows=args.expected_result_max_rows,
         progress_label="synthetic",
     )
     manual_enriched = enrich_dialogues(
         manual,
         args.db,
         include_result_hash=args.include_result_hash,
+        expected_result_max_rows=args.expected_result_max_rows,
         progress_label="manual",
     )
 
     write_jsonl(args.output, synthetic_enriched)
     write_jsonl(args.manual_output, manual_enriched)
     write_jsonl(args.qwen_output, qwen_messages_from_dialogues([*synthetic_enriched, *manual_enriched]))
+    write_jsonl(args.state_eval_output, state_eval_rows_from_dialogues([*synthetic_enriched, *manual_enriched]))
 
     print(f"Wrote {len(synthetic_enriched)} synthetic dialogues / {count_turns(synthetic_enriched)} turns to {args.output}")
     print(f"Wrote {len(manual_enriched)} curated labeled dialogues / {count_turns(manual_enriched)} turns to {args.manual_output}")
     print(f"Wrote {count_turns(synthetic_enriched) + count_turns(manual_enriched)} Qwen state-tracking examples to {args.qwen_output}")
+    print(f"Wrote {count_turns(synthetic_enriched) + count_turns(manual_enriched)} state-tracking eval rows to {args.state_eval_output}")
 
 
 if __name__ == "__main__":

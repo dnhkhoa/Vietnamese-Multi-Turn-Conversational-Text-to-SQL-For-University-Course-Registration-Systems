@@ -51,6 +51,7 @@ def reset_engine() -> None:
 def init_state() -> None:
     st.session_state.setdefault("db_path", str(DEFAULT_DB_PATH))
     st.session_state.setdefault("parser_mode", default_parser_mode())
+    st.session_state.setdefault("model_only_eval", False)
     st.session_state.setdefault("lora_path", str(DEFAULT_ADAPTER_PATH) if DEFAULT_ADAPTER_PATH.exists() else "")
     st.session_state.setdefault("remote_api_url", "")
     st.session_state.setdefault("messages", [])
@@ -74,7 +75,13 @@ def render_result(item: dict) -> None:
         render_model_failure(item["model_error"])
         return
 
-    st.success("MODEL OK")
+    parser_source = item.get("parser_source", "unknown")
+    if parser_source == "qwen":
+        st.success("MODEL OK")
+    elif parser_source == "rule_fallback":
+        st.warning("RULE FALLBACK")
+    else:
+        st.info("RULE RESULT")
     if item.get("message"):
         st.write(item["message"])
     if item.get("warnings"):
@@ -120,7 +127,10 @@ def main() -> None:
     init_state()
 
     st.title("Course Registration Chatbot")
-    st.caption("Model-only evaluation mode")
+    if st.session_state.model_only_eval:
+        st.caption("Model-only evaluation mode")
+    else:
+        st.caption("Interactive mode: rule/fallback results are shown")
 
     with st.sidebar:
         st.subheader("Runtime")
@@ -132,20 +142,29 @@ def main() -> None:
             if st.session_state.parser_mode in {"hybrid", "remote", "rule"}
             else 0,
         )
+        model_only_eval = st.checkbox(
+            "Model-only evaluation",
+            value=st.session_state.model_only_eval,
+            help="Bật khi muốn đánh giá riêng Qwen parser. Khi bật, rule fallback sẽ bị ẩn.",
+        )
         lora_path = st.text_input("LoRA adapter", value=st.session_state.lora_path)
         remote_api_url = st.text_input("Remote API", value=st.session_state.remote_api_url)
 
         if st.button("Reload", use_container_width=True):
             st.session_state.db_path = db_path
             st.session_state.parser_mode = parser_mode
+            st.session_state.model_only_eval = model_only_eval
             st.session_state.lora_path = lora_path
             st.session_state.remote_api_url = remote_api_url
             reset_engine()
             st.rerun()
 
         st.divider()
-        st.write("Chỉ kết quả từ Qwen parser được hiển thị.")
-        st.write("Rule fallback bị ẩn để không làm sai lệch đánh giá model.")
+        if st.session_state.model_only_eval:
+            st.write("Chỉ kết quả từ Qwen parser được hiển thị.")
+            st.write("Rule fallback bị ẩn để không làm sai lệch đánh giá model.")
+        else:
+            st.write("Rule parser và rule fallback được hiển thị để demo/test project.")
 
     for item in st.session_state.messages:
         with st.chat_message("user"):
@@ -163,7 +182,7 @@ def main() -> None:
     with st.chat_message("assistant"):
         try:
             result = st.session_state.engine.ask(question)
-            if not is_model_result(result):
+            if st.session_state.model_only_eval and not is_model_result(result):
                 parser_warning = result.parser_warning or f"parser_source={result.parser_source}"
                 item = {"question": question, "model_error": parser_warning}
                 st.session_state.engine.reset()
