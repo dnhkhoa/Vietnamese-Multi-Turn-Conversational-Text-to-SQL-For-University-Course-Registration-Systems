@@ -1,0 +1,117 @@
+{
+  "current_term": {
+    "HocKy": 2,
+    "NamHoc": 2026
+  },
+  "dataset": "advisor_gap_dataset_v03",
+  "eval_state": {
+    "missing_gold": 0,
+    "row_count_by_intent": {
+      "COURSE_OFFERING_SEARCH": {
+        "avg": 50.0,
+        "count": 40,
+        "max": 50,
+        "min": 50,
+        "zero": 0
+      },
+      "COURSE_RECOMMENDATION": {
+        "avg": 8.73,
+        "count": 140,
+        "max": 10,
+        "min": 3,
+        "zero": 0
+      },
+      "CURRICULUM_COURSE_SEARCH": {
+        "avg": 5.0,
+        "count": 20,
+        "max": 5,
+        "min": 5,
+        "zero": 0
+      },
+      "STUDENT_INFO_LOOKUP": {
+        "avg": 1.0,
+        "count": 60,
+        "max": 1,
+        "min": 1,
+        "zero": 0
+      },
+      "STUDENT_RESULT_LOOKUP": {
+        "avg": 22.08,
+        "count": 60,
+        "max": 27,
+        "min": 12,
+        "zero": 0
+      }
+    },
+    "rows": 320,
+    "truncated_results": 0
+  },
+  "existing_dataset_leakage": {
+    "existing_question_count": 7930,
+    "new_eval_overlap_count": 0,
+    "new_eval_overlap_examples": [],
+    "new_train_overlap_count": 0,
+    "new_train_overlap_examples": []
+  },
+  "files": {
+    "eval_dialogues": "data\\advisor_gap_eval_dialogues_v03.jsonl",
+    "eval_state": "data\\state_tracking_advisor_gap_eval_v03.jsonl",
+    "markdown_report": "docs\\advisor_gap_dataset_v03.md",
+    "quality_report": "data\\advisor_gap_quality_report_v03.json",
+    "train_dialogues": "data\\advisor_gap_train_dialogues_v03.jsonl",
+    "train_qwen": "data\\qwen_state_tracking_advisor_gap_train_v03.jsonl"
+  },
+  "leakage": {
+    "question_overlap_count": 0,
+    "question_overlap_examples": []
+  },
+  "quality_gates": {
+    "contains_course_recommendation": true,
+    "eval_has_gold_for_every_row": true,
+    "no_duplicate_full_train_input": true,
+    "no_overlap_with_existing_qwen_train": true,
+    "no_student_overlap": true,
+    "no_train_eval_question_overlap": true
+  },
+  "student_split": {
+    "eval_students": 80,
+    "overlap": 0,
+    "train_students": 240
+  },
+  "train_qwen": {
+    "duplicate_full_input_count": 0,
+    "duplicate_question_count": 567,
+    "edit_operations": {
+      "ADD_FILTER": 120,
+      "CHANGE_INTENT": 420,
+      "LIMIT": 60,
+      "NEW_QUERY": 240,
+      "REPLACE_FILTER": 60,
+      "RESOLVE_REFERENCE": 60
+    },
+    "intents": {
+      "COURSE_OFFERING_SEARCH": 120,
+      "COURSE_RECOMMENDATION": 420,
+      "CURRICULUM_COURSE_SEARCH": 60,
+      "STUDENT_INFO_LOOKUP": 180,
+      "STUDENT_RESULT_LOOKUP": 180
+    },
+    "rows": 960,
+    "slots": {
+      "HocKy": 600,
+      "KetQua": 60,
+      "Limit": 60,
+      "LoaiYC": 120,
+      "MaSV": 840,
+      "NamHoc": 540,
+      "TrangThaiLHP": 120
+    },
+    "sources": {
+      "advisor_context_switch_train_v03": 240,
+      "advisor_current_term_train_v03": 240,
+      "advisor_recommendation_train_v03": 240,
+      "advisor_studied_context_train_v03": 240
+    },
+    "with_previous_state": 720
+  }
+}

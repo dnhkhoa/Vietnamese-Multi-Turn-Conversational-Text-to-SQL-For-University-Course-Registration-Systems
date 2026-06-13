@@ -21,6 +21,7 @@ from .business_rules import (
     find_eligible_offerings_for_course,
 )
 from .llm_state_parser import ParsedState, QwenStateParser, RemoteStateParser, StateParserError, validate_state
+from .recommendation_engine import recommend_courses
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -307,6 +308,8 @@ class VietnameseNL2SQLEngine:
             slots.update(extracted_slots)
 
         intent = self._detect_intent(norm, slots, previous, edit_operation)
+        if intent == "OUT_OF_SCOPE":
+            slots = {}
         if edit_operation in {"CHANGE_INTENT", "AGGREGATE"} and intent != previous.intent:
             slots = self._keep_reusable_slots(slots)
             slots.update(extracted_slots)
@@ -326,6 +329,12 @@ class VietnameseNL2SQLEngine:
     def _normalize_external_state(self, state: Dict[str, Any], user_text: str) -> Dict[str, Any]:
         parsed = validate_state(state)
         slots = dict(parsed.slots)
+        if parsed.intent == "OUT_OF_SCOPE":
+            return {
+                "intent": parsed.intent,
+                "edit_operation": parsed.edit_operation,
+                "slots": {},
+            }
 
         ma_mh = slots.get("MaMH")
         if ma_mh:
@@ -343,7 +352,7 @@ class VietnameseNL2SQLEngine:
 
         extracted = self._extract_slots(user_text)
         for key in ["MaSV", "MaMH", "TenMH", "MaLHP", "MaNganh", "TenNganh"]:
-            if key in extracted:
+            if key in extracted and key not in slots:
                 slots[key] = extracted[key]
 
         return {
@@ -394,8 +403,13 @@ class VietnameseNL2SQLEngine:
             course_phrase = self._extract_entity_phrase(norm, "mon")
             if course_phrase:
                 course = self.catalog.match_course(course_phrase, allow_fuzzy=True)
+                if course is None and any(marker in norm for marker in ["may tin chi", "so tin chi", "thong tin mon"]):
+                    slots["TenMH"] = course_phrase
         if course:
             slots.update({"MaMH": course["MaMH"], "TenMH": course["TenMH"]})
+
+        if "MaMH" in slots and any(marker in norm for marker in ["anh huong", "khong hoc", "bo qua mon"]):
+            slots["PrereqDirection"] = "REQUIRED_BY"
 
         if self._should_match_major(norm):
             major = self.catalog.match_major(user_text, allow_fuzzy=False)
@@ -409,6 +423,11 @@ class VietnameseNL2SQLEngine:
         hoc_ky = self._extract_semester(norm)
         if hoc_ky is not None:
             slots["HocKy"] = hoc_ky
+        elif any(marker in norm for marker in ["ky nay", "ki nay", "hk nay", "hoc ky hien tai", "ky hien tai"]):
+            nam_hoc_hien_tai, hoc_ky_hien_tai = self._current_term()
+            if nam_hoc_hien_tai is not None and hoc_ky_hien_tai is not None:
+                slots["NamHoc"] = nam_hoc_hien_tai
+                slots["HocKy"] = hoc_ky_hien_tai
 
         nam_hoc = re.search(r"\b(20\d{2})\b", norm)
         if nam_hoc:
@@ -500,9 +519,20 @@ class VietnameseNL2SQLEngine:
         match = re.search(r"\b(?:hoc ky|hk|ky)\s*([1-8])\b", norm)
         if match:
             return int(match.group(1))
-        if "ky nay" in norm:
-            return 1
         return None
+
+    def _current_term(self) -> Tuple[Optional[int], Optional[int]]:
+        row = self.conn.execute(
+            """
+            SELECT NamHoc, HocKy
+            FROM LopHP
+            ORDER BY NamHoc DESC, HocKy DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return None, None
+        return as_int(row["NamHoc"]), as_int(row["HocKy"])
 
     @staticmethod
     def _should_match_major(norm: str) -> bool:
@@ -612,6 +642,8 @@ class VietnameseNL2SQLEngine:
     ) -> str:
         if previous.intent is None:
             return "NEW_QUERY"
+        if any(x in norm for x in ["nen dang ky", "nen dang ki", "goi y", "tu van", "nen hoc mon", "mon nao nhe"]):
+            return "CHANGE_INTENT"
         eligibility_markers = ["co dk duoc", "dk duoc", "dk dc", "dang ky duoc", "dang ki duoc", "co dang ky duoc"]
         has_eligibility_marker = any(x in norm for x in eligibility_markers)
         if has_eligibility_marker and self._has_reference(norm):
@@ -765,6 +797,22 @@ class VietnameseNL2SQLEngine:
         previous: QueryContext,
         edit_operation: str,
     ) -> str:
+        if any(x in norm for x in ["thoi tiet", "bong da", "an gi", "dat ve", "mua hang", "tin tuc", "crypto"]):
+            return "OUT_OF_SCOPE"
+        if any(
+            x in norm
+            for x in [
+                "nen dang ky",
+                "nen dang ki",
+                "goi y",
+                "tu van",
+                "nen hoc mon",
+                "mon nao nhe",
+                "mon nao phu hop",
+                "uu tien hoc mon nao",
+            ]
+        ):
+            return "COURSE_RECOMMENDATION"
         if any(x in norm for x in ["du dieu kien", "co hoc duoc"]) or (
             any(x in norm for x in ["dang ky duoc", "dang ki duoc", "dk duoc", "dk dc", "co dang ky duoc", "co dk duoc"])
             and ("MaSV" in slots or "MaLHP" in slots or "sinh vien" in norm)
@@ -789,6 +837,8 @@ class VietnameseNL2SQLEngine:
                 "mon nao yeu cau",
                 "truoc khi hoc",
                 "can qua mon",
+                "anh huong",
+                "khong hoc",
             ]
         ) or (
             "yeu cau hoc" in norm and "truoc" in norm
@@ -840,6 +890,10 @@ class VietnameseNL2SQLEngine:
             warnings.append(f"Parser fallback: {parser_warning}")
         if intent == "REGISTRATION_ELIGIBILITY_CHECK":
             df, sql, params, message = self._execute_eligibility(slots)
+        elif intent == "COURSE_RECOMMENDATION":
+            df, sql, params, message = self._execute_recommendation(slots)
+        elif intent == "OUT_OF_SCOPE":
+            df, sql, params, message = self._execute_out_of_scope()
         elif intent == "STUDENT_INFO_LOOKUP":
             df, sql, params, message = self._execute_student_info(slots)
         elif intent == "PREREQUISITE_LOOKUP":
@@ -923,6 +977,9 @@ class VietnameseNL2SQLEngine:
         if "MaMH" in slots:
             conditions.append("MaMH = :ma_mh")
             params["ma_mh"] = slots["MaMH"]
+        if "TenMH" in slots:
+            conditions.append("TenMH LIKE :ten_mh")
+            params["ten_mh"] = f"%{slots['TenMH']}%"
         if "SoTC" in slots:
             conditions.append("SoTC = :so_tc")
             params["so_tc"] = slots["SoTC"]
@@ -1049,6 +1106,9 @@ class VietnameseNL2SQLEngine:
         if "MaMH" in slots:
             conditions.append("MaMH = :ma_mh")
             params["ma_mh"] = slots["MaMH"]
+        if "TenMH" in slots:
+            conditions.append("TenMH LIKE :ten_mh")
+            params["ten_mh"] = f"%{slots['TenMH']}%"
         if "MaLHP" in slots:
             conditions.append("MaLHP = :ma_lhp")
             params["ma_lhp"] = slots["MaLHP"]
@@ -1122,6 +1182,34 @@ class VietnameseNL2SQLEngine:
         )
         df = self._execute_sql(sql, params, slots.get("Limit", 100))
         return df, sql, params, self._summary_message(df, "dòng tổng hợp tín chỉ")
+
+    def _execute_recommendation(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any], str]:
+        ma_sv = slots.get("MaSV")
+        params: Dict[str, Any] = {}
+        if not ma_sv:
+            return pd.DataFrame(), None, params, "Cần mã sinh viên để gợi ý môn đăng ký."
+        params = {
+            "ma_sv": ma_sv,
+            "nam_hoc": slots.get("NamHoc"),
+            "hoc_ky": slots.get("HocKy"),
+            "loai_yc": slots.get("LoaiYC"),
+            "limit": slots.get("Limit", 10),
+        }
+        rows = recommend_courses(
+            self.conn,
+            ma_sv=ma_sv,
+            nam_hoc=slots.get("NamHoc"),
+            hoc_ky=slots.get("HocKy"),
+            loai_yc=slots.get("LoaiYC"),
+            limit=slots.get("Limit", 10),
+        )
+        df = pd.DataFrame(rows)
+        sql = "-- recommendation_engine.recommend_courses(:ma_sv, :nam_hoc, :hoc_ky, :loai_yc)"
+        return df, sql, params, self._summary_message(df, "môn/lớp gợi ý")
+
+    @staticmethod
+    def _execute_out_of_scope() -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any], str]:
+        return pd.DataFrame(), None, {}, "Câu hỏi nằm ngoài phạm vi đăng ký môn học."
 
     def _execute_eligibility(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any], str]:
         ma_sv = slots.get("MaSV")

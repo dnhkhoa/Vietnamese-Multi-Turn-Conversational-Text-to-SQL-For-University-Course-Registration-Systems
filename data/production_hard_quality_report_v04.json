@@ -1,0 +1,87 @@
+{
+  "dataset": "production_hard_cases_v04",
+  "edit_operations": {
+    "CHANGE_ENTITY": 30,
+    "CHANGE_INTENT": 240,
+    "NEW_QUERY": 180,
+    "REPLACE_FILTER": 30
+  },
+  "eval_row_count_by_intent": {
+    "COURSE_INFO_SEARCH": {
+      "avg": 0.0,
+      "count": 30,
+      "max": 0,
+      "min": 0,
+      "zero": 30
+    },
+    "COURSE_RECOMMENDATION": {
+      "avg": 8.47,
+      "count": 270,
+      "max": 10,
+      "min": 0,
+      "zero": 30
+    },
+    "OUT_OF_SCOPE": {
+      "avg": 0.0,
+      "count": 30,
+      "max": 0,
+      "min": 0,
+      "zero": 30
+    },
+    "PREREQUISITE_LOOKUP": {
+      "avg": 1.0,
+      "count": 30,
+      "max": 1,
+      "min": 1,
+      "zero": 0
+    },
+    "REGISTRATION_ELIGIBILITY_CHECK": {
+      "avg": 2.07,
+      "count": 30,
+      "max": 3,
+      "min": 1,
+      "zero": 0
+    },
+    "STUDENT_INFO_LOOKUP": {
+      "avg": 1.0,
+      "count": 60,
+      "max": 1,
+      "min": 1,
+      "zero": 0
+    },
+    "STUDENT_RESULT_LOOKUP": {
+      "avg": 23.77,
+      "count": 30,
+      "max": 28,
+      "min": 20,
+      "zero": 0
+    }
+  },
+  "eval_rows": 480,
+  "intents": {
+    "COURSE_INFO_SEARCH": 30,
+    "COURSE_RECOMMENDATION": 270,
+    "OUT_OF_SCOPE": 30,
+    "PREREQUISITE_LOOKUP": 30,
+    "REGISTRATION_ELIGIBILITY_CHECK": 30,
+    "STUDENT_INFO_LOOKUP": 60,
+    "STUDENT_RESULT_LOOKUP": 30
+  },
+  "quality_gates": {
+    "all_eval_rows_have_expected_state": true,
+    "all_train_states_validate": true,
+    "contains_invalid_entity": true,
+    "contains_missing_required_slot": true,
+    "contains_multi_student_context": true,
+    "contains_out_of_scope": true
+  },
+  "sources": {
+    "production_ambiguous_advice_v04": 90,
+    "production_invalid_entity_v04": 60,
+    "production_missing_required_slot_v04": 90,
+    "production_multi_student_context_v04": 120,
+    "production_out_of_scope_v04": 60,
+    "production_prereq_impact_v04": 60
+  },
+  "train_rows": 480
+}
