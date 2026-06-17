@@ -12,7 +12,7 @@ from src.nl2sql_engine import VietnameseNL2SQLEngine
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_ADAPTER_PATH = PROJECT_ROOT / "viedu-unsloth-local" / "outputs" / "adapters" / "colab_unsloth_qwen3b_lora"
+DEFAULT_ADAPTER_PATH = PROJECT_ROOT / "models" / "qwen3b-lora-state-tracking"
 
 os.environ.setdefault("NL2SQL_ALLOW_MODEL_DOWNLOAD", "1")
 
@@ -29,7 +29,7 @@ def make_engine() -> VietnameseNL2SQLEngine:
         "remote_api_url": st.session_state.remote_api_url or None,
     }
     signature = inspect.signature(VietnameseNL2SQLEngine)
-    if "model_only_parser" in signature.parameters:
+    if "model_only_parser" in signature.parameters and kwargs["parser_mode"] != "rule":
         kwargs.update(
             {
                 "strict_parser": True,
@@ -37,7 +37,10 @@ def make_engine() -> VietnameseNL2SQLEngine:
                 "repair_model_output": False,
             }
         )
-    return VietnameseNL2SQLEngine(**kwargs)
+    engine = VietnameseNL2SQLEngine(**kwargs)
+    if st.session_state.get("active_ma_sv"):
+        engine.set_active_student(st.session_state.active_ma_sv)
+    return engine
 
 
 def reset_engine() -> None:
@@ -50,16 +53,17 @@ def reset_engine() -> None:
 
 def init_state() -> None:
     st.session_state.setdefault("db_path", str(DEFAULT_DB_PATH))
-    st.session_state.setdefault("parser_mode", default_parser_mode())
+    st.session_state.setdefault("parser_mode", os.getenv("NL2SQL_PARSER_MODE", default_parser_mode()))
     st.session_state.setdefault("lora_path", str(DEFAULT_ADAPTER_PATH) if DEFAULT_ADAPTER_PATH.exists() else "")
     st.session_state.setdefault("remote_api_url", "")
+    st.session_state.setdefault("active_ma_sv", os.getenv("NL2SQL_ACTIVE_MA_SV", "23110001"))
     st.session_state.setdefault("messages", [])
     if "engine" not in st.session_state:
         st.session_state.engine = make_engine()
 
 
 def is_model_result(result) -> bool:
-    return result.parser_source == "qwen"
+    return result.parser_source == "qwen" or st.session_state.parser_mode == "rule"
 
 
 def render_model_failure(error: str | None = None) -> None:
@@ -83,7 +87,11 @@ def render_result(item: dict) -> None:
         st.warning(item["parser_warning"])
 
     st.caption("Result")
-    st.dataframe(item["data"], use_container_width=True, hide_index=True)
+    data = item["data"]
+    if data is None or (getattr(data, "empty", False) and len(getattr(data, "columns", [])) == 0):
+        st.info("Không có bảng kết quả để hiển thị.")
+    else:
+        st.dataframe(data.head(100), use_container_width=True, hide_index=True)
 
     with st.expander("SQL"):
         st.code(item.get("sql") or "-- no SQL generated", language="sql")
@@ -120,32 +128,25 @@ def main() -> None:
     init_state()
 
     st.title("Course Registration Chatbot")
-    st.caption("Model-only evaluation mode")
+    st.caption("Model-only evaluation mode" if st.session_state.parser_mode != "rule" else "Rule execution debug mode")
 
     with st.sidebar:
-        st.subheader("Runtime")
-        db_path = st.text_input("Database", value=st.session_state.db_path)
-        parser_mode = st.selectbox(
-            "Parser",
-            options=["hybrid", "remote", "rule"],
-            index=["hybrid", "remote", "rule"].index(st.session_state.parser_mode)
-            if st.session_state.parser_mode in {"hybrid", "remote", "rule"}
-            else 0,
-        )
-        lora_path = st.text_input("LoRA adapter", value=st.session_state.lora_path)
-        remote_api_url = st.text_input("Remote API", value=st.session_state.remote_api_url)
+        st.subheader("Session")
+        active_ma_sv = st.text_input("MSSV", value=st.session_state.active_ma_sv)
+        st.caption(f"DB: {st.session_state.db_path}")
+        st.caption(f"Parser: {st.session_state.parser_mode}")
 
         if st.button("Reload", use_container_width=True):
-            st.session_state.db_path = db_path
-            st.session_state.parser_mode = parser_mode
-            st.session_state.lora_path = lora_path
-            st.session_state.remote_api_url = remote_api_url
+            st.session_state.active_ma_sv = active_ma_sv.strip()
             reset_engine()
             st.rerun()
 
         st.divider()
-        st.write("Chỉ kết quả từ Qwen parser được hiển thị.")
-        st.write("Rule fallback bị ẩn để không làm sai lệch đánh giá model.")
+        if st.session_state.parser_mode == "rule":
+            st.write("Đang chạy rule debug để kiểm tra DB/execution.")
+        else:
+            st.write("Chỉ kết quả từ Qwen parser được hiển thị.")
+            st.write("Rule fallback bị ẩn để không làm sai lệch đánh giá model.")
 
     for item in st.session_state.messages:
         with st.chat_message("user"):
@@ -162,7 +163,8 @@ def main() -> None:
 
     with st.chat_message("assistant"):
         try:
-            result = st.session_state.engine.ask(question)
+            active_ma_sv = st.session_state.get("active_ma_sv") or None
+            result = st.session_state.engine.ask(question, ma_sv=active_ma_sv)
             if not is_model_result(result):
                 parser_warning = result.parser_warning or f"parser_source={result.parser_source}"
                 item = {"question": question, "model_error": parser_warning}

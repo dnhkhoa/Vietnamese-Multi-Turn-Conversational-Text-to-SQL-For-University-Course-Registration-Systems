@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -10,10 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-SYSTEM_PROMPT = (
-    "Ban la bo phan tich state cho bai toan Vietnamese multi-turn text-to-SQL "
-    "trong he thong dang ky mon hoc. Chi tra JSON hop le gom intent, edit_operation, slots."
-)
+os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
+os.environ.setdefault("TRANSFORMERS_NO_VISION", "1")
+os.environ.setdefault("TRANSFORMERS_NO_AUDIO", "1")
 
 ALLOWED_INTENTS = {
     "COURSE_OFFERING_SEARCH",
@@ -24,6 +24,7 @@ ALLOWED_INTENTS = {
     "STUDENT_REGISTRATION_LOOKUP",
     "STUDENT_RESULT_LOOKUP",
     "CREDIT_SUMMARY",
+    "COURSE_RECOMMENDATION",
     "REGISTRATION_ELIGIBILITY_CHECK",
     "PREREQUISITE_LOOKUP",
     "AGGREGATION_STATISTICS",
@@ -44,6 +45,8 @@ ALLOWED_EDIT_OPERATIONS = {
 
 INTENT_ALIASES = {
     "COURSE_SEARCH": "COURSE_OFFERING_SEARCH",
+    "VIEW_COURSE": "COURSE_OFFERING_SEARCH",
+    "VIEW_COURSES": "COURSE_OFFERING_SEARCH",
     "VIEW_COURSE_CLASSES": "COURSE_OFFERING_SEARCH",
     "VIEW_CLASSES": "COURSE_OFFERING_SEARCH",
     "SEARCH_COURSE_CLASSES": "COURSE_OFFERING_SEARCH",
@@ -55,6 +58,13 @@ INTENT_ALIASES = {
     "VIEW_COURSE_OFFERINGS": "COURSE_OFFERING_SEARCH",
     "LIST_COURSE_CLASSES": "COURSE_OFFERING_SEARCH",
     "LIST_CLASSES": "COURSE_OFFERING_SEARCH",
+    "LIST_OPEN_COURSES": "COURSE_OFFERING_SEARCH",
+    "GET_OPEN_COURSES": "COURSE_OFFERING_SEARCH",
+    "OPEN_COURSES": "COURSE_OFFERING_SEARCH",
+    "OPEN_COURSE_SEARCH": "COURSE_OFFERING_SEARCH",
+    "LIST_OPEN_CLASSES": "COURSE_OFFERING_SEARCH",
+    "GET_OPEN_CLASSES": "COURSE_OFFERING_SEARCH",
+    "OPEN_CLASSES": "COURSE_OFFERING_SEARCH",
     "FIND_CLASSES": "COURSE_OFFERING_SEARCH",
     "COURSE_CLASSES_SEARCH": "COURSE_OFFERING_SEARCH",
     "COURSE_CLASS_SEARCH": "COURSE_OFFERING_SEARCH",
@@ -77,13 +87,27 @@ INTENT_ALIASES = {
     "STUDENT_REGISTRATION": "STUDENT_REGISTRATION_LOOKUP",
     "VIEW_STUDENT_REGISTRATION": "STUDENT_REGISTRATION_LOOKUP",
     "VIEW_STUDENT_REGISTRATIONS": "STUDENT_REGISTRATION_LOOKUP",
+    "LIST_REGISTERED_COURSES": "STUDENT_REGISTRATION_LOOKUP",
+    "LIST_STUDENT_COURSES": "STUDENT_REGISTRATION_LOOKUP",
+    "LIST_REGISTERED_CLASSES": "STUDENT_REGISTRATION_LOOKUP",
+    "REGISTERED_CLASSES": "STUDENT_REGISTRATION_LOOKUP",
+    "GET_STUDENT_REGISTERED_COURSES": "STUDENT_REGISTRATION_LOOKUP",
+    "GET_REGISTERED_COURSES": "STUDENT_REGISTRATION_LOOKUP",
     "STUDENT_RESULTS": "STUDENT_RESULT_LOOKUP",
     "STUDENT_RESULT": "STUDENT_RESULT_LOOKUP",
+    "LIST_COMPLETED_COURSES": "STUDENT_RESULT_LOOKUP",
+    "LIST_PASSED_COURSES": "STUDENT_RESULT_LOOKUP",
+    "LIST_STUDIED_COURSES": "STUDENT_RESULT_LOOKUP",
+    "GET_STUDENT_RESULTS": "STUDENT_RESULT_LOOKUP",
+    "GET_STUDIED_COURSES": "STUDENT_RESULT_LOOKUP",
+    "CHECK_COURSE_STATUS": "STUDENT_RESULT_LOOKUP",
+    "CHECK_GRADE": "STUDENT_RESULT_LOOKUP",
     "CHECK_REGISTRATION": "REGISTRATION_ELIGIBILITY_CHECK",
     "CHECK_COURSE_REGISTRATION": "REGISTRATION_ELIGIBILITY_CHECK",
     "REGISTRATION_CHECK": "REGISTRATION_ELIGIBILITY_CHECK",
     "REGISTRATION_ELIGIBILITY": "REGISTRATION_ELIGIBILITY_CHECK",
     "ELIGIBILITY_CHECK": "REGISTRATION_ELIGIBILITY_CHECK",
+    "CONFIRM_REGISTRATION": "REGISTRATION_ELIGIBILITY_CHECK",
     "PREREQUISITES": "PREREQUISITE_LOOKUP",
     "PREREQUISITE": "PREREQUISITE_LOOKUP",
     "PREREQUISITE_SEARCH": "PREREQUISITE_LOOKUP",
@@ -91,21 +115,40 @@ INTENT_ALIASES = {
     "STATISTICS": "AGGREGATION_STATISTICS",
     "AGGREGATE": "AGGREGATION_STATISTICS",
     "COUNT_STATISTICS": "AGGREGATION_STATISTICS",
+    "LIST_CLASSES_PER_COURSE": "AGGREGATION_STATISTICS",
+    "SELECT_SUBJECTS": "AGGREGATION_STATISTICS",
+    "GET_STUDENT_CREDITS": "CREDIT_SUMMARY",
+    "FILTER_REQUIRED_COURSES": "CURRICULUM_COURSE_SEARCH",
+    "LIST_COURSES_BY_MAJOR": "CURRICULUM_COURSE_SEARCH",
+    "COURSES_BY_MAJOR": "CURRICULUM_COURSE_SEARCH",
+    "COURSE_RECOMMENDATION_SEARCH": "COURSE_RECOMMENDATION",
+    "RECOMMEND_COURSES": "COURSE_RECOMMENDATION",
+    "COURSE_ADVICE": "COURSE_RECOMMENDATION",
+    "ACADEMIC_ADVICE": "COURSE_RECOMMENDATION",
+    "SUGGEST_COURSES": "COURSE_RECOMMENDATION",
+    "SUGGEST_REGISTRATION": "COURSE_RECOMMENDATION",
 }
 
 EDIT_OPERATION_ALIASES = {
     "NEW": "NEW_QUERY",
+    "NONE": "NEW_QUERY",
+    "NULL": "NEW_QUERY",
+    "NO_OP": "NEW_QUERY",
+    "NO_CHANGE": "NEW_QUERY",
     "QUERY": "NEW_QUERY",
     "SEARCH": "NEW_QUERY",
     "VIEW": "NEW_QUERY",
     "LIST": "NEW_QUERY",
     "FILTER": "ADD_FILTER",
     "ADD_CONDITION": "ADD_FILTER",
+    "ADD": "ADD_FILTER",
     "ADD_FILTERS": "ADD_FILTER",
     "REMOVE_CONDITION": "REMOVE_FILTER",
     "REMOVE_FILTERS": "REMOVE_FILTER",
     "REPLACE_CONDITION": "REPLACE_FILTER",
     "UPDATE_FILTER": "REPLACE_FILTER",
+    "UPDATE": "REPLACE_FILTER",
+    "UPDATE_SLOT": "REPLACE_FILTER",
     "CHANGE_COURSE": "CHANGE_ENTITY",
     "CHANGE_COURSE_ID": "CHANGE_ENTITY",
     "CHANGE_CLASS": "CHANGE_ENTITY",
@@ -114,6 +157,8 @@ EDIT_OPERATION_ALIASES = {
     "CHANGE_OBJECT": "CHANGE_ENTITY",
     "SWITCH_INTENT": "CHANGE_INTENT",
     "CHANGE_TASK": "CHANGE_INTENT",
+    "CHANGE_FILTER": "REPLACE_FILTER",
+    "SWITCH_FILTER": "REPLACE_FILTER",
     "REFERENCE": "RESOLVE_REFERENCE",
     "REFER": "RESOLVE_REFERENCE",
     "REFERENCE_RESOLUTION": "RESOLVE_REFERENCE",
@@ -155,6 +200,7 @@ SLOT_ALIASES = {
     "limit": "Limit",
     "sort": "SortBy",
     "sort_by": "SortBy",
+    "use_logged_in_student": "UseLoggedInStudent",
 }
 
 ALLOWED_SLOTS = {
@@ -182,7 +228,21 @@ ALLOWED_SLOTS = {
     "Limit",
     "SortBy",
     "SortDirection",
+    "UseLoggedInStudent",
 }
+
+SYSTEM_PROMPT = (
+    "Ban la bo phan tich state cho bai toan Vietnamese multi-turn text-to-SQL trong he thong dang ky mon hoc.\n"
+    "Chi tra ve mot JSON object hop le, khong markdown, khong giai thich.\n"
+    "Schema bat buoc: {\"intent\": string, \"edit_operation\": string, \"slots\": object}.\n"
+    "intent BAT BUOC la mot trong cac gia tri sau, khong duoc tao intent moi: "
+    + ", ".join(sorted(ALLOWED_INTENTS))
+    + ".\n"
+    "edit_operation BAT BUOC la mot trong cac gia tri sau: "
+    + ", ".join(sorted(ALLOWED_EDIT_OPERATIONS))
+    + ".\n"
+    "Neu khong chac intent, chon intent gan nhat trong danh sach allowed, tuyet doi khong sinh label moi."
+)
 
 INT_SLOTS = {"HocKy", "NamHoc", "Thu", "TietBD", "TietKT", "CoTheDangKy", "Limit"}
 UPPER_SLOTS = {"MaSV", "MaMH", "MaLHP", "MaNganh", "Nhom", "Buoi", "TrangThaiLHP", "LoaiYC", "KetQua", "PrereqDirection", "SortBy", "SortDirection", "MaPhong", "DayNha"}
@@ -294,6 +354,253 @@ def normalize_state_object(obj: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def normalize_text(text: str) -> str:
+    text = text.replace("đ", "d").replace("Đ", "D")
+    normalized = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    text = re.sub(r"[^a-zA-Z0-9_\-\s]", " ", text).lower()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def canonical_intent(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().upper()
+    if token in {"", "NONE", "NULL"}:
+        return None
+    return INTENT_ALIASES.get(token, token)
+
+
+def infer_allowed_intent_from_utterance(
+    utterance: str,
+    previous_state: Dict[str, Any],
+    slots: Dict[str, Any],
+) -> str:
+    norm = normalize_text(utterance)
+    previous_intent = canonical_intent(previous_state.get("intent"))
+    has_reference = any(
+        marker in norm
+        for marker in [
+            "mon nay",
+            "mon do",
+            "lop nay",
+            "lop do",
+            "sinh vien nay",
+            "sinh vien do",
+            "ban nay",
+            "ban do",
+            "nguoi nay",
+            "nguoi do",
+        ]
+    )
+    if previous_intent in ALLOWED_INTENTS and has_reference:
+        return previous_intent
+    if any(marker in norm for marker in ["mssv", "ma sinh vien", "ma sv", "thong tin cua toi", "toi la ai"]):
+        return "STUDENT_INFO_LOOKUP"
+    if any(marker in norm for marker in ["da hoc", "hoc nhung mon gi", "mon da hoc", "ket qua", "da dat", "chua dat", "rot", "truot", "qua mon"]):
+        return "STUDENT_RESULT_LOOKUP"
+    if "da dang ky" in norm or "da dang ki" in norm or "dang ky nhung lop nao" in norm or "dang ki nhung lop nao" in norm:
+        return "STUDENT_REGISTRATION_LOOKUP"
+    if any(marker in norm for marker in ["du dieu kien", "dang ky duoc", "dang ki duoc", "dk duoc", "co dk duoc"]):
+        return "REGISTRATION_ELIGIBILITY_CHECK"
+    if any(
+        marker in norm
+        for marker in [
+            "tien quyet",
+            "hoc truoc",
+            "can hoc truoc",
+            "truoc khi hoc",
+            "yeu cau hoc",
+            "nen hoc mon nao truoc",
+            "hoc mon nao truoc",
+            "mon nao truoc",
+        ]
+    ):
+        return "PREREQUISITE_LOOKUP"
+    if any(marker in norm for marker in ["nen dang ky", "nen dang ki", "nen hoc", "goi y", "phu hop cho toi"]):
+        return "COURSE_RECOMMENDATION"
+    if any(marker in norm for marker in ["tong tin chi", "bao nhieu tin chi da dang ky", "dang ky bao nhieu tin chi"]):
+        return "CREDIT_SUMMARY"
+    if any(marker in norm for marker in ["ctdt", "chuong trinh", "nganh", "khoa", "bat buoc", "tu chon", "hoc duoc"]):
+        return "CURRICULUM_COURSE_SEARCH"
+    if any(marker in norm for marker in ["moi mon", "bao nhieu lop", "co may lop", "thong ke", "dem "]):
+        return "AGGREGATION_STATISTICS"
+    if any(marker in norm for marker in ["lich", "thu ", "buoi", "phong", "giang vien", "ai day"]):
+        return "COURSE_SCHEDULE_SEARCH"
+    if any(marker in norm for marker in ["may tin chi", "so tin chi", "thong tin mon", "thuoc nganh"]):
+        return "COURSE_INFO_SEARCH"
+    if previous_intent in ALLOWED_INTENTS and any(marker in norm for marker in ["chi lay", "loc", "doi sang", "chuyen sang", "lay ", "top "]):
+        return previous_intent
+    return "COURSE_OFFERING_SEARCH"
+
+
+def repair_state_for_utterance(
+    obj: Dict[str, Any],
+    utterance: str,
+    previous_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    state = normalize_state_object(obj)
+    norm = normalize_text(utterance)
+    slots = dict(state.get("slots") or {})
+    previous_slots = dict(previous_state.get("slots") or {})
+
+    carries_context = any(
+        marker in norm
+        for marker in [
+            "chi lay",
+            "loc",
+            "doi sang",
+            "chuyen sang",
+            "mon nay",
+            "mon do",
+            "lop do",
+            "sinh vien nay",
+            "sinh vien do",
+            "ban nay",
+            "ban do",
+            "nguoi nay",
+            "nguoi do",
+            "lay ",
+        ]
+    )
+    if carries_context:
+        merged_slots = dict(previous_slots)
+        merged_slots.update(slots)
+        slots = merged_slots
+
+    is_directional_sang = "doi sang" in norm or "chuyen sang" in norm
+    if "buoi sang" in norm or "lop sang" in norm or (re.search(r"\bsang\b", norm) and not is_directional_sang):
+        slots["Buoi"] = "SANG"
+    if "buoi chieu" in norm or re.search(r"\bchieu\b", norm):
+        slots["Buoi"] = "CHIEU"
+    if any(marker in norm for marker in ["con cho", "con slot", "dang ky duoc", "dang ki duoc"]):
+        slots["CoTheDangKy"] = 1
+    if (
+        "dang mo" in norm
+        or "lop mo" in norm
+        or "trang thai mo" in norm
+        or (re.search(r"\bmo\b", norm) and any(marker in norm for marker in ["lop", "mon", "hoc phan"]))
+    ):
+        slots["TrangThaiLHP"] = "MO"
+    if "bat buoc" in norm:
+        slots["LoaiYC"] = "BAT_BUOC"
+    if "tu chon" in norm:
+        slots["LoaiYC"] = "TU_CHON"
+    if "rot" in norm or "truot" in norm or "khong dat" in norm or "chua dat" in norm:
+        slots["KetQua"] = "KHONG_DAT"
+    elif "da qua" in norm or "qua mon" in norm or re.search(r"\bqua\b", norm):
+        slots["KetQua"] = "DAT"
+    limit_match = re.search(r"\b(?:lay|top)\s*(\d+)\b", norm)
+    if limit_match:
+        slots["Limit"] = int(limit_match.group(1))
+
+    if any(marker in norm for marker in ["tien quyet", "yeu cau", "hoc truoc", "truoc mon gi"]):
+        if "MaMH" not in slots and "MaMH" in previous_slots:
+            slots["MaMH"] = previous_slots["MaMH"]
+        slots["PrereqDirection"] = "REQUIRED_BY" if "yeu cau" in norm and "truoc" in norm else "PREREQUISITES_OF"
+
+    generic_open_course_query = (
+        (
+            "mon hoc mo" in norm
+            or "nhung mon mo" in norm
+            or "cac mon mo" in norm
+            or ("mon nao" in norm and "hoc duoc" in norm and any(marker in norm for marker in ["khoa", "nganh"]))
+        )
+        and "MaMH" not in slots
+    )
+    if generic_open_course_query:
+        slots.pop("MaMH", None)
+        slots.pop("TenMH", None)
+
+    if "doi sang" in norm or "chuyen sang" in norm:
+        if "Buoi" not in previous_slots and not any(marker in norm for marker in ["buoi sang", "lop sang", "buoi chieu", "lop chieu"]):
+            slots.pop("Buoi", None)
+        if "CoTheDangKy" not in previous_slots and not any(marker in norm for marker in ["con cho", "con slot", "dang ky duoc", "dang ki duoc"]):
+            slots.pop("CoTheDangKy", None)
+
+    if isinstance(slots.get("HocKy"), int) and not 1 <= slots["HocKy"] <= 8:
+        slots.pop("HocKy", None)
+
+    state["slots"] = slots
+    intent = state.get("intent")
+    intent_token = canonical_intent(intent)
+
+    if intent_token is None:
+        previous_intent = previous_state.get("intent")
+        if previous_intent and any(
+            marker in norm
+            for marker in [
+                "chi lay",
+                "loc",
+                "doi sang",
+                "mon nay",
+                "mon do",
+                "lop do",
+                "sinh vien nay",
+                "sinh vien do",
+                "ban nay",
+                "ban do",
+                "nguoi nay",
+                "nguoi do",
+                "lay ",
+            ]
+        ):
+            state["intent"] = previous_intent
+        elif "tin chi" in norm and "sinh vien" in norm:
+            state["intent"] = "CREDIT_SUMMARY"
+        elif "moi mon" in norm or "bao nhieu lop" in norm:
+            state["intent"] = "AGGREGATION_STATISTICS"
+        else:
+            state["intent"] = "COURSE_OFFERING_SEARCH"
+
+    intent = state.get("intent")
+    intent_token = canonical_intent(intent)
+
+    if any(marker in norm for marker in ["tien quyet", "yeu cau", "hoc truoc", "truoc mon gi"]):
+        state["intent"] = "PREREQUISITE_LOOKUP"
+        intent_token = "PREREQUISITE_LOOKUP"
+
+    if intent_token == "LIST_COURSES":
+        if any(marker in norm for marker in ["nganh", "khoa", "chuong trinh", "hoc duoc"]):
+            state["intent"] = "CURRICULUM_COURSE_SEARCH"
+        elif "dang ky" in norm and "sinh vien" in norm:
+            state["intent"] = "STUDENT_REGISTRATION_LOOKUP"
+        else:
+            state["intent"] = "COURSE_OFFERING_SEARCH"
+    elif intent_token == "FIND_COURSE":
+        if any(marker in norm for marker in ["lhp", "hoc thu", "phong", "giang vien", "lich"]):
+            state["intent"] = "COURSE_SCHEDULE_SEARCH"
+        elif any(marker in norm for marker in ["tien quyet", "yeu cau", "hoc truoc", "truoc"]):
+            state["intent"] = "PREREQUISITE_LOOKUP"
+        else:
+            state["intent"] = "COURSE_INFO_SEARCH"
+    elif intent_token == "GET_COURSE":
+        if "sinh vien" in norm and any(marker in norm for marker in ["nganh", "khoa", "hoc"]):
+            state["intent"] = "STUDENT_INFO_LOOKUP"
+        else:
+            state["intent"] = "COURSE_INFO_SEARCH"
+
+    intent_token = canonical_intent(state.get("intent"))
+    if intent_token not in ALLOWED_INTENTS:
+        state["intent"] = infer_allowed_intent_from_utterance(utterance, previous_state, slots)
+
+    edit_operation = state.get("edit_operation")
+    edit_token = edit_operation.strip().upper() if isinstance(edit_operation, str) else edit_operation
+    if edit_token in {"", "NONE", "NULL", None}:
+        if any(marker in norm for marker in ["doi sang", "chuyen sang"]):
+            state["edit_operation"] = "CHANGE_ENTITY"
+        elif any(marker in norm for marker in ["chi lay", "loc", "bat buoc", "con cho", "buoi"]):
+            state["edit_operation"] = "ADD_FILTER"
+        elif any(marker in norm for marker in ["mon nay", "mon do", "lop do", "ban do"]):
+            state["edit_operation"] = "RESOLVE_REFERENCE"
+        elif any(marker in norm for marker in ["lay ", "top "]):
+            state["edit_operation"] = "LIMIT"
+        else:
+            state["edit_operation"] = "NEW_QUERY"
+
+    return state
+
+
 def normalize_slots(slots: Dict[str, Any]) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     for key, value in slots.items():
@@ -306,8 +613,7 @@ def validate_state(obj: Dict[str, Any]) -> ParsedState:
     obj = normalize_state_object(obj)
     intent = obj.get("intent")
     edit_operation = obj.get("edit_operation")
-    if isinstance(intent, str):
-        intent = INTENT_ALIASES.get(intent.strip().upper(), intent.strip().upper())
+    intent = canonical_intent(intent)
     if isinstance(edit_operation, str):
         edit_operation = EDIT_OPERATION_ALIASES.get(
             edit_operation.strip().upper(),
@@ -332,9 +638,12 @@ def validate_state(obj: Dict[str, Any]) -> ParsedState:
                 value = MODEL_COURSE_CODE_ALIASES.get(token, value)
         if key in INT_SLOTS:
             try:
-                clean_slots[key] = int(value)
+                int_value = int(value)
             except (TypeError, ValueError):
                 continue
+            if key == "HocKy" and not 1 <= int_value <= 8:
+                continue
+            clean_slots[key] = int_value
         elif key in UPPER_SLOTS and isinstance(value, str):
             clean_slots[key] = value.strip().upper()
         else:
@@ -396,12 +705,14 @@ class QwenStateParser:
         adapter_path: str | Path,
         base_model: Optional[str] = None,
         max_new_tokens: int = 192,
+        repair_output: bool = True,
     ) -> None:
         self.adapter_path = Path(adapter_path)
         if not self.adapter_path.exists():
             raise StateParserError(f"Adapter path does not exist: {self.adapter_path}")
         self.base_model = base_model or self._read_base_model()
         self.max_new_tokens = max_new_tokens
+        self.repair_output = repair_output
         self._tokenizer = None
         self._model = None
         self._torch = None
@@ -417,8 +728,19 @@ class QwenStateParser:
                 return str(base)
         return "Qwen/Qwen2.5-Coder-7B-Instruct"
 
-    @staticmethod
-    def _preflight_runtime() -> None:
+    def _min_vram_gb(self) -> float:
+        name = self.base_model.lower()
+        if "1.5b" in name or "1_5b" in name:
+            return 3.5
+        if "3b" in name:
+            return 5.0
+        if "7b" in name:
+            return 7.0
+        if "14b" in name or "15b" in name:
+            return 12.0
+        return 7.0
+
+    def _preflight_runtime(self) -> None:
         try:
             import torch
         except ImportError:
@@ -426,9 +748,10 @@ class QwenStateParser:
         if not torch.cuda.is_available():
             return
         total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        if total_vram_gb < 7 and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
+        min_vram_gb = self._min_vram_gb()
+        if total_vram_gb < min_vram_gb and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
             raise StateParserError(
-                f"Qwen2.5 7B adapter needs more GPU memory than this local GPU appears to have "
+                f"{self.base_model} needs about {min_vram_gb:.1f} GB VRAM, but this GPU appears to have "
                 f"({total_vram_gb:.1f} GB). Use Kaggle/Colab/T4+, a smaller adapter, or set "
                 "NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
             )
@@ -440,18 +763,21 @@ class QwenStateParser:
             import torch
             from peft import PeftModel
             from transformers import AutoModelForCausalLM, AutoTokenizer
-        except ImportError as exc:
+        except Exception as exc:
             raise StateParserError(
-                "Missing training dependencies. Install requirements-train.txt before using Qwen parser."
+                "Cannot import Qwen inference dependencies. Check the model environment from "
+                "requirements-train.txt. Original error: "
+                f"{type(exc).__name__}: {exc}"
             ) from exc
 
         self._torch = torch
         local_files_only = os.getenv("NL2SQL_ALLOW_MODEL_DOWNLOAD") != "1"
         if torch.cuda.is_available():
             total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            if total_vram_gb < 7 and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
+            min_vram_gb = self._min_vram_gb()
+            if total_vram_gb < min_vram_gb and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
                 raise StateParserError(
-                    f"Qwen2.5 7B adapter needs more GPU memory than this local GPU appears to have "
+                    f"{self.base_model} needs about {min_vram_gb:.1f} GB VRAM, but this GPU appears to have "
                     f"({total_vram_gb:.1f} GB). Use Kaggle/Colab/T4+, a smaller adapter, or set "
                     "NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
                 )
@@ -461,6 +787,10 @@ class QwenStateParser:
             trust_remote_code=True,
             local_files_only=True,
         )
+        if not getattr(self._tokenizer, "chat_template", None):
+            template_path = self.adapter_path / "chat_template.jinja"
+            if template_path.exists():
+                self._tokenizer.chat_template = template_path.read_text(encoding="utf-8")
 
         model_kwargs: Dict[str, Any] = {"trust_remote_code": True}
         if torch.cuda.is_available():
@@ -517,15 +847,18 @@ class QwenStateParser:
             )
         generated = output_ids[0, inputs["input_ids"].shape[-1] :]
         text = self._tokenizer.decode(generated, skip_special_tokens=True)
-        state = validate_state(extract_json_object(text))
+        raw_state = extract_json_object(text)
+        state_obj = repair_state_for_utterance(raw_state, utterance, previous_state) if self.repair_output else raw_state
+        state = validate_state(state_obj)
         state.raw_text = text
         return state
 
 
 class RemoteStateParser:
-    def __init__(self, api_url: str, timeout_seconds: float = 60.0) -> None:
+    def __init__(self, api_url: str, timeout_seconds: float = 60.0, repair_output: bool = True) -> None:
         self.api_url = api_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.repair_output = repair_output
         if not self.api_url:
             raise StateParserError("Remote Qwen API URL is empty")
 
@@ -553,6 +886,8 @@ class RemoteStateParser:
 
         obj = json.loads(response_body)
         state_obj, raw_text = extract_state_from_response(obj)
+        if self.repair_output:
+            state_obj = repair_state_for_utterance(state_obj, utterance, previous_state)
         parsed = validate_state(state_obj)
         if isinstance(raw_text, str):
             parsed.raw_text = raw_text

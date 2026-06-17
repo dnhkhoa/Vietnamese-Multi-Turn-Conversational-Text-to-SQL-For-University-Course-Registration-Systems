@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "course_registration.db"
+_LOCAL_FIXED_DB_PATH = PROJECT_ROOT.parent / "ctdt_sis_v2_fixed.db"
+DEFAULT_DB_PATH = Path(
+    os.getenv(
+        "COURSE_REGISTRATION_DB_PATH",
+        str(_LOCAL_FIXED_DB_PATH if _LOCAL_FIXED_DB_PATH.exists() else PROJECT_ROOT / "data" / "course_registration.db"),
+    )
+)
 DEFAULT_VIEWS_PATH = PROJECT_ROOT / "views.sql"
 MAX_CREDITS_PER_SEMESTER = 28
 
@@ -21,6 +28,65 @@ def connect_db(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def table_or_view_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE name = :name
+          AND type IN ('table', 'view')
+        LIMIT 1
+        """,
+        {"name": name},
+    ).fetchone()
+    return row is not None
+
+
+def get_current_term(conn: sqlite3.Connection) -> tuple[int, int]:
+    if table_or_view_exists(conn, "HocKyHeThong"):
+        row = conn.execute(
+            """
+            SELECT NamHoc, HocKy
+            FROM HocKyHeThong
+            WHERE DangMoDangKy = 1
+            ORDER BY NamHoc DESC, HocKy DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is not None:
+            return int(row["NamHoc"]), int(row["HocKy"])
+
+    if table_or_view_exists(conn, "CauHinhDangKy"):
+        rows = conn.execute(
+            """
+            SELECT MaCauHinh, GiaTri
+            FROM CauHinhDangKy
+            WHERE MaCauHinh IN ('NAM_HOC_HIEN_TAI', 'HOC_KY_HIEN_TAI')
+            """
+        ).fetchall()
+        values = {str(row["MaCauHinh"]): row["GiaTri"] for row in rows}
+        if "NAM_HOC_HIEN_TAI" in values and "HOC_KY_HIEN_TAI" in values:
+            return int(values["NAM_HOC_HIEN_TAI"]), int(values["HOC_KY_HIEN_TAI"])
+
+    row = conn.execute(
+        """
+        SELECT NamHoc, HocKy
+        FROM LopHP
+        ORDER BY NamHoc DESC, HocKy DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        raise ValueError("Không tìm thấy học kỳ hiện tại trong database.")
+    return int(row["NamHoc"]), int(row["HocKy"])
+
+
+def passed_courses_source(conn: sqlite3.Connection) -> str:
+    if table_or_view_exists(conn, "v_ket_qua_tot_nhat_sv"):
+        return "v_ket_qua_tot_nhat_sv"
+    return "v_ket_qua_day_du" if table_or_view_exists(conn, "v_ket_qua_day_du") else "KetQua"
 
 
 def apply_views_if_missing(
@@ -99,16 +165,17 @@ def get_missing_prerequisites(
     ma_sv: str,
     ma_mh: str,
 ) -> List[RowDict]:
+    result_source = passed_courses_source(conn)
     return _fetch_all(
         conn,
-        """
+        f"""
         SELECT
             tq.MaMH,
             tq.TenMH,
             tq.MaMHTQ,
             tq.TenMHTQ
         FROM v_tien_quyet_day_du tq
-        LEFT JOIN KetQua kq
+        LEFT JOIN {result_source} kq
             ON kq.MaSV = :ma_sv
            AND kq.MaMH = tq.MaMHTQ
            AND kq.KetQua = 'DAT'
