@@ -19,8 +19,12 @@ from .business_rules import (
     check_registration_eligibility,
     connect_db,
     find_eligible_offerings_for_course,
+    get_current_term,
+    passed_courses_source,
+    table_or_view_exists,
 )
 from .llm_state_parser import ParsedState, QwenStateParser, RemoteStateParser, StateParserError, validate_state
+from .recommendation_engine import recommend_courses
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +62,7 @@ class QueryContext:
     params: Dict[str, Any] = field(default_factory=dict)
     last_df: Optional[pd.DataFrame] = None
     last_user_text: str = ""
+    entity_history: Dict[str, List[str]] = field(default_factory=lambda: {"MaMH": [], "MaSV": [], "MaLHP": [], "MaNganh": []})
 
     def copy(self) -> "QueryContext":
         return QueryContext(
@@ -68,6 +73,7 @@ class QueryContext:
             params=dict(self.params),
             last_df=self.last_df.copy() if self.last_df is not None else None,
             last_user_text=self.last_user_text,
+            entity_history={key: list(values) for key, values in self.entity_history.items()},
         )
 
 
@@ -118,6 +124,21 @@ class Catalog:
             names.update(manual)
             for name in names:
                 alias_map[normalize_text(name)] = ma_mh
+        if table_or_view_exists(self.conn, "MonHocAlias"):
+            rows = self.conn.execute(
+                """
+                SELECT MaMH, Alias, AliasNormalized
+                FROM MonHocAlias
+                """
+            ).fetchall()
+            valid_courses = {str(course["MaMH"]).upper() for course in self.courses}
+            for row in rows:
+                ma_mh = str(row["MaMH"]).upper()
+                if ma_mh not in valid_courses:
+                    continue
+                for value in (row["Alias"], row["AliasNormalized"]):
+                    if value:
+                        alias_map[normalize_text(str(value))] = ma_mh
         return alias_map
 
     def _build_major_aliases(self) -> Dict[str, str]:
@@ -126,6 +147,8 @@ class Catalog:
             ma_nganh = major["MaNganh"]
             names = {major["TenNganh"], ma_nganh}
             names.update(MAJOR_ALIASES.get(ma_nganh, []))
+            if normalize_text(str(major["TenNganh"])) == "cong nghe thong tin":
+                names.update({"cntt", "it", "cong nghe thong tin"})
             for name in names:
                 alias_map[normalize_text(name)] = ma_nganh
         return alias_map
@@ -205,6 +228,9 @@ class VietnameseNL2SQLEngine:
         parser_mode: str = "rule",
         lora_path: Optional[Path | str] = None,
         remote_api_url: Optional[str] = None,
+        strict_parser: bool = False,
+        model_only_parser: bool = False,
+        repair_model_output: bool = True,
     ):
         self.db_path = Path(db_path)
         self.context = QueryContext()
@@ -212,14 +238,19 @@ class VietnameseNL2SQLEngine:
         self.conn = connect_db(self.db_path)
         apply_views_if_missing(self.conn)
         self.catalog = Catalog(self.conn)
+        self.current_nam_hoc, self.current_hoc_ky = self._load_current_term()
         self.parser_mode = parser_mode
+        self.strict_parser = strict_parser
+        self.model_only_parser = model_only_parser
+        self.repair_model_output = repair_model_output
+        self.active_ma_sv: Optional[str] = None
         self.state_parser = state_parser
         self.parser_load_error: Optional[str] = None
         if self.parser_mode == "remote" and self.state_parser is None:
             configured_url = remote_api_url or os.getenv("NL2SQL_QWEN_API_URL")
             if configured_url:
                 try:
-                    self.state_parser = RemoteStateParser(configured_url)
+                    self.state_parser = RemoteStateParser(configured_url, repair_output=repair_model_output)
                 except Exception as exc:
                     self.parser_load_error = str(exc)
                     self.parser_mode = "rule"
@@ -230,10 +261,16 @@ class VietnameseNL2SQLEngine:
             configured_lora = lora_path or os.getenv("NL2SQL_LORA_PATH")
             if configured_lora:
                 try:
-                    self.state_parser = QwenStateParser(configured_lora)
+                    self.state_parser = QwenStateParser(configured_lora, repair_output=repair_model_output)
                 except Exception as exc:
                     self.parser_load_error = str(exc)
                     self.parser_mode = "rule"
+
+    def _load_current_term(self) -> Tuple[Optional[int], Optional[int]]:
+        try:
+            return get_current_term(self.conn)
+        except (sqlite3.Error, ValueError):
+            return None, None
 
     def close(self) -> None:
         with self._lock:
@@ -243,12 +280,28 @@ class VietnameseNL2SQLEngine:
         with self._lock:
             self.context = QueryContext()
 
-    def ask(self, user_text: str) -> QueryResult:
+    def set_active_student(self, ma_sv: Optional[str]) -> None:
         with self._lock:
+            self.active_ma_sv = ma_sv
+
+    def ask(self, user_text: str, ma_sv: Optional[str] = None) -> QueryResult:
+        with self._lock:
+            if ma_sv:
+                self.active_ma_sv = ma_sv
             base_context = self.context.copy()
             parsed = self._parse(user_text, base_context)
             intent = parsed["intent"]
             slots = parsed["slots"]
+            if self.active_ma_sv and intent in {
+                "COURSE_RECOMMENDATION",
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "STUDENT_INFO_LOOKUP",
+                "STUDENT_REGISTRATION_LOOKUP",
+                "STUDENT_RESULT_LOOKUP",
+                "CREDIT_SUMMARY",
+                "CURRICULUM_COURSE_SEARCH",
+            }:
+                slots.setdefault("MaSV", self.active_ma_sv)
             edit_operation = parsed["edit_operation"]
             parser_source = parsed.get("parser_source", "rule")
             parser_warning = parsed.get("parser_warning")
@@ -270,12 +323,16 @@ class VietnameseNL2SQLEngine:
                 params=dict(result.params),
                 last_df=result.dataframe.copy(),
                 last_user_text=user_text,
+                entity_history=self._updated_entity_history(base_context.entity_history, result.slots),
             )
             return result
 
     def _parse(self, user_text: str, previous: QueryContext) -> Dict[str, Any]:
         rule_parsed = self._parse_rule(user_text, previous)
         if self.parser_mode not in {"hybrid", "remote"} or self.state_parser is None:
+            if self.model_only_parser:
+                reason = self.parser_load_error or "Qwen parser is not available"
+                raise StateParserError(reason)
             if self.parser_load_error:
                 rule_parsed["parser_warning"] = self.parser_load_error
             return rule_parsed
@@ -283,10 +340,24 @@ class VietnameseNL2SQLEngine:
         previous_state = self._previous_state(previous)
         try:
             llm_state = self.state_parser.parse(user_text, previous_state)
-            llm_parsed = self._normalize_external_state(llm_state.as_dict(), user_text)
+            if self.repair_model_output:
+                llm_parsed = self._normalize_external_state(llm_state.as_dict(), user_text, previous, rule_parsed)
+            else:
+                llm_parsed = {
+                    "intent": llm_state.intent,
+                    "edit_operation": llm_state.edit_operation,
+                    "slots": dict(llm_state.slots),
+                }
             llm_parsed["parser_source"] = "qwen"
             return llm_parsed
         except Exception as exc:
+            if self.model_only_parser:
+                raise
+            if self.strict_parser:
+                repaired = dict(rule_parsed)
+                repaired["parser_source"] = "qwen_repaired"
+                repaired["parser_warning"] = f"Qwen output repaired by state memory: {exc}"
+                return repaired
             if isinstance(exc, StateParserError):
                 self.parser_load_error = str(exc)
                 self.parser_mode = "rule"
@@ -298,7 +369,7 @@ class VietnameseNL2SQLEngine:
     def _parse_rule(self, user_text: str, previous: QueryContext) -> Dict[str, Any]:
         norm = normalize_text(user_text)
         slots = self._initial_slots_from_context(norm, previous)
-        extracted_slots = self._extract_slots(user_text)
+        extracted_slots = self._extract_slots(user_text, previous)
         edit_operation = self._detect_edit_operation(norm, previous, extracted_slots)
 
         if edit_operation == "REMOVE_FILTER":
@@ -307,6 +378,7 @@ class VietnameseNL2SQLEngine:
             slots.update(extracted_slots)
 
         intent = self._detect_intent(norm, slots, previous, edit_operation)
+        slots = self._drop_stale_context_slots(norm, intent, slots, extracted_slots)
         if edit_operation in {"CHANGE_INTENT", "AGGREGATE"} and intent != previous.intent:
             slots = self._keep_reusable_slots(slots)
             slots.update(extracted_slots)
@@ -321,11 +393,57 @@ class VietnameseNL2SQLEngine:
             "intent": previous.intent,
             "edit_operation": previous.edit_operation or "NEW_QUERY",
             "slots": dict(previous.slots),
+            "entity_history": {key: list(values) for key, values in previous.entity_history.items()},
         }
 
-    def _normalize_external_state(self, state: Dict[str, Any], user_text: str) -> Dict[str, Any]:
+    @staticmethod
+    def _updated_entity_history(
+        history: Dict[str, List[str]],
+        slots: Dict[str, Any],
+        max_items: int = 8,
+    ) -> Dict[str, List[str]]:
+        updated = {key: list(values) for key, values in history.items()}
+        for key in ["MaMH", "MaSV", "MaLHP", "MaNganh"]:
+            value = slots.get(key)
+            if value in (None, ""):
+                continue
+            token = str(value)
+            values = list(updated.get(key, []))
+            if not values or values[-1] != token:
+                values.append(token)
+            updated[key] = values[-max_items:]
+        return updated
+
+    def _normalize_external_state(
+        self,
+        state: Dict[str, Any],
+        user_text: str,
+        previous: Optional[QueryContext] = None,
+        rule_parsed: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         parsed = validate_state(state)
         slots = dict(parsed.slots)
+        norm = normalize_text(user_text)
+        has_reference = self._has_reference(norm)
+        if has_reference and previous is not None:
+            merged_slots = dict(previous.slots)
+            merged_slots.update(slots)
+            slots = merged_slots
+
+        extracted = self._extract_slots(user_text, previous)
+        generic_course_query = (
+            (
+                "mon hoc mo" in norm
+                or "nhung mon mo" in norm
+                or "cac mon mo" in norm
+                or ("mon nao" in norm and "hoc duoc" in norm and any(marker in norm for marker in ["khoa", "nganh"]))
+            )
+            and "MaMH" not in slots
+            and "MaMH" not in extracted
+        )
+        if generic_course_query:
+            slots.pop("MaMH", None)
+            slots.pop("TenMH", None)
 
         ma_mh = slots.get("MaMH")
         if ma_mh:
@@ -341,27 +459,115 @@ class VietnameseNL2SQLEngine:
                 slots["MaNganh"] = major["MaNganh"]
                 slots["TenNganh"] = major["TenNganh"]
 
-        extracted = self._extract_slots(user_text)
-        for key in ["MaSV", "MaMH", "TenMH", "MaLHP", "MaNganh", "TenNganh"]:
+        if generic_course_query:
+            extracted.pop("MaMH", None)
+            extracted.pop("TenMH", None)
+        for key in ["MaSV", "MaMH", "TenMH", "MaLHP", "MaNganh", "TenNganh", "HocKy", "NamHoc"]:
             if key in extracted:
                 slots[key] = extracted[key]
 
+        intent = parsed.intent
+        edit_operation = parsed.edit_operation
+        if rule_parsed is not None:
+            rule_intent = rule_parsed.get("intent")
+            rule_edit = rule_parsed.get("edit_operation")
+            if self._should_trust_rule_intent(norm, rule_intent, intent, has_reference):
+                intent = rule_intent
+                if rule_edit:
+                    edit_operation = rule_edit
+            if rule_edit and rule_edit != "NEW_QUERY" and (has_reference or edit_operation == "NEW_QUERY"):
+                edit_operation = rule_edit
+        slots = self._drop_stale_context_slots(norm, intent, slots, extracted)
+
         return {
-            "intent": parsed.intent,
-            "edit_operation": parsed.edit_operation,
+            "intent": intent,
+            "edit_operation": edit_operation,
             "slots": slots,
         }
+
+    @staticmethod
+    def _should_trust_rule_intent(
+        norm: str,
+        rule_intent: Optional[str],
+        model_intent: str,
+        has_reference: bool,
+    ) -> bool:
+        if not rule_intent or rule_intent == model_intent:
+            return False
+        if rule_intent != "COURSE_OFFERING_SEARCH" and (has_reference or model_intent == "COURSE_OFFERING_SEARCH"):
+            return True
+        high_confidence = {
+            "STUDENT_INFO_LOOKUP": ["mssv", "ma sv", "ma sinh vien", "thong tin cua toi", "toi la ai"],
+            "STUDENT_RESULT_LOOKUP": ["da hoc", "hoc nhung mon gi", "nhung mon da hoc", "mon da hoc", "ket qua"],
+            "STUDENT_REGISTRATION_LOOKUP": ["da dang ky", "da dang ki", "dang ky nhung lop nao", "dang ki nhung lop nao"],
+            "COURSE_RECOMMENDATION": ["nen dang ky", "nen dang ki", "goi y", "phu hop cho toi"],
+            "PREREQUISITE_LOOKUP": ["tien quyet", "hoc truoc", "truoc khi hoc", "mon nao truoc", "nen hoc mon nao truoc"],
+            "CREDIT_SUMMARY": ["tong tin chi", "bao nhieu tin chi da dang ky"],
+        }
+        return any(marker in norm for marker in high_confidence.get(rule_intent, []))
+
+    @staticmethod
+    def _drop_stale_context_slots(
+        norm: str,
+        intent: str,
+        slots: Dict[str, Any],
+        extracted_slots: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        cleaned = dict(slots)
+        if intent == "STUDENT_INFO_LOOKUP":
+            keep = {"MaSV", "HoTen", "MaNganh", "TenNganh", "Limit"}
+            return {key: value for key, value in cleaned.items() if key in keep or key in extracted_slots}
+        if intent in {"STUDENT_RESULT_LOOKUP", "STUDENT_REGISTRATION_LOOKUP", "CREDIT_SUMMARY"}:
+            always_stale_keys = {
+                "Nhom",
+                "Buoi",
+                "Thu",
+                "TietBD",
+                "TietKT",
+                "MaPhong",
+                "DayNha",
+                "TrangThaiLHP",
+                "CoTheDangKy",
+                "PrereqDirection",
+            }
+            for key in always_stale_keys:
+                if key not in extracted_slots:
+                    cleaned.pop(key, None)
+            has_explicit_course_or_class = (
+                "MaMH" in extracted_slots
+                or "MaLHP" in extracted_slots
+                or any(marker in norm for marker in ["mon nay", "mon do", "lhp"])
+            )
+            if not has_explicit_course_or_class:
+                for key in {"MaMH", "TenMH", "MaLHP"}:
+                    if key not in extracted_slots:
+                        cleaned.pop(key, None)
+            if intent == "STUDENT_RESULT_LOOKUP" and not any(marker in norm for marker in ["ky ", "ki ", "hoc ky", "hoc ki", "nam "]):
+                for key in ["HocKy", "NamHoc"]:
+                    if key not in extracted_slots:
+                        cleaned.pop(key, None)
+            if intent in {"STUDENT_REGISTRATION_LOOKUP", "CREDIT_SUMMARY"} and "KetQua" not in extracted_slots:
+                cleaned.pop("KetQua", None)
+            return cleaned
+        if intent == "PREREQUISITE_LOOKUP":
+            keep = {"MaSV", "MaMH", "TenMH", "PrereqDirection", "Limit"}
+            return {key: value for key, value in cleaned.items() if key in keep or key in extracted_slots}
+        return cleaned
 
     def _initial_slots_from_context(self, norm: str, previous: QueryContext) -> Dict[str, Any]:
         if previous.intent is None:
             return {}
         reset_markers = [
+            "cho toi ",
+            "cho minh ",
             "cho toi xem",
             "hay liet ke",
             "liet ke",
             "tim ",
             "tra cuu",
             "danh sach",
+            "cac lop",
+            "cac mon",
             "sinh vien ",
             "sinh vien nao",
             "mon nao",
@@ -371,7 +577,7 @@ class VietnameseNL2SQLEngine:
             return {}
         return dict(previous.slots)
 
-    def _extract_slots(self, user_text: str) -> Dict[str, Any]:
+    def _extract_slots(self, user_text: str, previous: Optional[QueryContext] = None) -> Dict[str, Any]:
         norm = normalize_text(user_text)
         slots: Dict[str, Any] = {}
 
@@ -382,6 +588,12 @@ class VietnameseNL2SQLEngine:
         ma_lhp = re.search(r"\b(lhp\d{9})\b", norm)
         if ma_lhp:
             slots["MaLHP"] = ma_lhp.group(1).upper()
+
+        remembered_course = self._resolve_remembered_course(norm, previous)
+        if remembered_course:
+            course = self.catalog.get_course(remembered_course)
+            if course:
+                slots.update({"MaMH": course["MaMH"], "TenMH": course["TenMH"]})
 
         ma_mh = re.search(r"\b([a-z]{4}\d{6}e)\b", norm)
         if ma_mh:
@@ -407,6 +619,10 @@ class VietnameseNL2SQLEngine:
                 slots.update({"MaNganh": major["MaNganh"], "TenNganh": major["TenNganh"]})
 
         hoc_ky = self._extract_semester(norm)
+        if self._is_current_term_reference(norm):
+            hoc_ky = self.current_hoc_ky
+            if self.current_nam_hoc is not None:
+                slots["NamHoc"] = self.current_nam_hoc
         if hoc_ky is not None:
             slots["HocKy"] = hoc_ky
 
@@ -449,7 +665,12 @@ class VietnameseNL2SQLEngine:
             slots["CoTheDangKy"] = 1
         if "het cho" in norm or "lop day" in norm or "da day" in norm or "full" in norm:
             slots["TrangThaiLHP"] = "DAY"
-        if "dang mo" in norm or "lop mo" in norm or "trang thai mo" in norm:
+        if (
+            "dang mo" in norm
+            or "lop mo" in norm
+            or "trang thai mo" in norm
+            or (re.search(r"\bmo\b", norm) and any(marker in norm for marker in ["lop", "mon", "hoc phan"]))
+        ):
             slots["TrangThaiLHP"] = "MO"
         if "lop dong" in norm or "da dong" in norm or "trang thai dong" in norm:
             slots["TrangThaiLHP"] = "DONG"
@@ -474,12 +695,16 @@ class VietnameseNL2SQLEngine:
             x in norm
             for x in [
                 "can hoc truoc",
+                "can hoc mon nao truoc",
                 "tien quyet cua",
                 "dieu kien tien quyet",
                 "truoc khi hoc",
                 "can qua mon",
                 "thieu tien quyet",
                 "thieu mon",
+                "mon nao truoc",
+                "hoc mon nao truoc",
+                "nen hoc mon nao truoc",
             ]
         ) or ("tien quyet" in norm and "mon nao yeu cau" not in norm):
             slots["PrereqDirection"] = "PREREQUISITES_OF"
@@ -495,14 +720,40 @@ class VietnameseNL2SQLEngine:
 
         return slots
 
+    def _resolve_remembered_course(self, norm: str, previous: Optional[QueryContext]) -> Optional[str]:
+        if previous is None:
+            return None
+        history = previous.entity_history.get("MaMH", [])
+        if not history:
+            return None
+        if any(marker in norm for marker in ["mon truoc", "mon vua roi", "mon luc truoc"]):
+            current = previous.slots.get("MaMH")
+            if current:
+                for ma_mh in reversed(history):
+                    if ma_mh != current:
+                        return ma_mh
+            if len(history) >= 1:
+                return history[-1]
+        if any(marker in norm for marker in ["mon ban dau", "mon dau tien"]):
+            return history[0]
+        if any(marker in norm for marker in ["quay lai", "tro lai", "doi ve", "xem lai", "ve lai"]):
+            course = self.catalog.match_course(norm, allow_fuzzy=False)
+            if course and course["MaMH"] in history:
+                return course["MaMH"]
+            if any(marker in norm for marker in ["mon truoc", "truoc do", "vua roi"]) and len(history) >= 2:
+                return history[-2]
+        return None
+
     @staticmethod
     def _extract_semester(norm: str) -> Optional[int]:
-        match = re.search(r"\b(?:hoc ky|hk|ky)\s*([1-8])\b", norm)
+        match = re.search(r"\b(?:hoc ky|hoc ki|hk|ky|ki)\s*([1-8])\b", norm)
         if match:
             return int(match.group(1))
-        if "ky nay" in norm:
-            return 1
         return None
+
+    @staticmethod
+    def _is_current_term_reference(norm: str) -> bool:
+        return any(marker in norm for marker in ["ky nay", "ki nay", "hoc ky nay", "hoc ki nay", "ky hien tai", "ki hien tai"])
 
     @staticmethod
     def _should_match_major(norm: str) -> bool:
@@ -556,6 +807,12 @@ class VietnameseNL2SQLEngine:
             "tat ca",
             "tu chon",
             "bat buoc",
+            "truoc",
+            "truoc do",
+            "vua roi",
+            "luc truoc",
+            "ban dau",
+            "dau tien",
             "nay can hoc truoc mon gi",
         }
         if phrase in generic_phrases:
@@ -612,6 +869,10 @@ class VietnameseNL2SQLEngine:
     ) -> str:
         if previous.intent is None:
             return "NEW_QUERY"
+        if any(x in norm for x in ["mssv", "ma sv", "ma sinh vien", "thong tin cua toi", "toi la ai"]):
+            return "NEW_QUERY"
+        if any(x in norm for x in ["da hoc", "hoc nhung mon gi", "nhung mon da hoc", "mon da hoc"]):
+            return "NEW_QUERY"
         eligibility_markers = ["co dk duoc", "dk duoc", "dk dc", "dang ky duoc", "dang ki duoc", "co dang ky duoc"]
         has_eligibility_marker = any(x in norm for x in eligibility_markers)
         if has_eligibility_marker and self._has_reference(norm):
@@ -644,7 +905,7 @@ class VietnameseNL2SQLEngine:
             return "REPLACE_FILTER"
         if any(x in norm for x in ["bo loc", "bo dieu kien", "khong can", "tat ca"]):
             return "REMOVE_FILTER"
-        if any(x in norm for x in ["doi sang", "doi qua", "thay vi", "chuyen sang"]):
+        if any(x in norm for x in ["doi sang", "doi qua", "thay vi", "chuyen sang", "quay lai", "tro lai", "doi ve", "xem lai", "ve lai"]):
             if any(slot in extracted_slots for slot in ["MaMH", "MaSV", "MaLHP", "MaNganh"]):
                 return "CHANGE_ENTITY"
             return "REPLACE_FILTER"
@@ -674,6 +935,11 @@ class VietnameseNL2SQLEngine:
         reference_patterns = [
             r"\bmon nay\b",
             rf"\bmon do{after_reference}",
+            r"\bmon truoc\b",
+            r"\bmon vua roi\b",
+            r"\bmon luc truoc\b",
+            r"\bmon ban dau\b",
+            r"\bmon dau tien\b",
             r"\blop nay\b",
             rf"\blop do{after_reference}",
             r"\bsinh vien nay\b",
@@ -770,15 +1036,6 @@ class VietnameseNL2SQLEngine:
             and ("MaSV" in slots or "MaLHP" in slots or "sinh vien" in norm)
         ):
             return "REGISTRATION_ELIGIBILITY_CHECK"
-        if "da dang ky" in norm or ("MaSV" in slots and "lich" in norm):
-            return "STUDENT_REGISTRATION_LOOKUP"
-        if previous.intent and edit_operation == "CHANGE_ENTITY":
-            return previous.intent
-        if "MaSV" in slots and any(
-            x in norm
-            for x in ["thong tin", "chuong trinh", "ctdt", "nganh nao", "khoa nao", "trang thai"]
-        ):
-            return "STUDENT_INFO_LOOKUP"
         if any(
             x in norm
             for x in [
@@ -789,15 +1046,68 @@ class VietnameseNL2SQLEngine:
                 "mon nao yeu cau",
                 "truoc khi hoc",
                 "can qua mon",
+                "nen hoc mon nao truoc",
+                "hoc mon nao truoc",
+                "mon nao truoc",
             ]
         ) or (
             "yeu cau hoc" in norm and "truoc" in norm
+        ) or (
+            "truoc" in norm and "MaMH" in slots and any(marker in norm for marker in ["mon nay", "mon do", "voi mon"])
         ):
             return "PREREQUISITE_LOOKUP"
+        if any(
+            x in norm
+            for x in [
+                "nen dang ky mon nao",
+                "nen dang ki mon nao",
+                "nen hoc mon nao",
+                "nen hoc gi",
+                "goi y mon",
+                "goi y lop",
+                "mon nao nen dang ky",
+                "mon nao nen dang ki",
+                "dang ky mon nao",
+                "dang ki mon nao",
+                "hoc ky nay nen",
+                "ky nay nen",
+                "ki nay nen",
+                "toi nen dang ky",
+                "toi nen dang ki",
+            ]
+        ):
+            return "COURSE_RECOMMENDATION"
+        if "da dang ky" in norm or ("MaSV" in slots and "lich" in norm):
+            return "STUDENT_REGISTRATION_LOOKUP"
+        if previous.intent and edit_operation == "CHANGE_ENTITY":
+            return previous.intent
+        if "MaSV" in slots and any(
+            x in norm
+            for x in ["thong tin", "chuong trinh", "ctdt", "nganh nao", "khoa nao", "trang thai"]
+        ):
+            return "STUDENT_INFO_LOOKUP"
         if any(x in norm for x in ["tong tin chi", "bao nhieu tin chi da dang ky", "dang ky bao nhieu tin chi"]):
             return "CREDIT_SUMMARY"
-        if any(x in norm for x in ["ket qua", "da dat", "chua dat", "da qua", "rot", "truot", "qua mon"]):
+        if any(
+            x in norm
+            for x in [
+                "ket qua",
+                "da dat",
+                "chua dat",
+                "da qua",
+                "rot",
+                "truot",
+                "qua mon",
+                "da hoc",
+                "hoc nhung mon gi",
+                "hoc mon gi",
+                "nhung mon da hoc",
+                "mon da hoc",
+            ]
+        ):
             return "STUDENT_RESULT_LOOKUP"
+        if any(x in norm for x in ["mssv", "ma sv", "ma sinh vien", "thong tin cua toi", "toi la ai"]):
+            return "STUDENT_INFO_LOOKUP"
         if any(x in norm for x in ["chuong trinh", "ctdt", "nganh", "bat buoc", "tu chon"]) and "MaNganh" in slots:
             return "CURRICULUM_COURSE_SEARCH"
         if any(x in norm for x in ["may tin chi", "so tin chi", "thuoc nganh", "thong tin mon"]):
@@ -837,9 +1147,11 @@ class VietnameseNL2SQLEngine:
     ) -> QueryResult:
         warnings: List[str] = []
         if parser_warning:
-            warnings.append(f"Parser fallback: {parser_warning}")
+            warnings.append(f"Parser warning: {parser_warning}")
         if intent == "REGISTRATION_ELIGIBILITY_CHECK":
             df, sql, params, message = self._execute_eligibility(slots)
+        elif intent == "COURSE_RECOMMENDATION":
+            df, sql, params, message = self._execute_recommendation(slots)
         elif intent == "STUDENT_INFO_LOOKUP":
             df, sql, params, message = self._execute_student_info(slots)
         elif intent == "PREREQUISITE_LOOKUP":
@@ -897,10 +1209,19 @@ class VietnameseNL2SQLEngine:
             "SiSoDK, SiSoTD, SoChoCon, LichHocText, TenGV"
         )
         if needs_lich:
-            columns = (
-                "MaLHP, TenMH, Nhom, SoTC, NamHoc, HocKy, ThuText, TietText, "
-                "Buoi, MaPhong, TrangThaiLHP, SoChoCon, TenGV"
+            sql = (
+                "SELECT MaLHP, TenMH, Nhom, SoTC, NamHoc, HocKy, TrangThaiLHP, "
+                "MAX(SoChoCon) AS SoChoCon, "
+                "GROUP_CONCAT(DISTINCT Buoi) AS BuoiText, "
+                "GROUP_CONCAT(ThuText || ' ' || TietText || ' phong ' || MaPhong, '; ') AS LichHocText, "
+                "GROUP_CONCAT(DISTINCT TenGV) AS TenGV\n"
+                f"FROM {view}\n"
+                f"{where}\n"
+                "GROUP BY MaLHP, TenMH, Nhom, SoTC, NamHoc, HocKy, TrangThaiLHP\n"
+                "ORDER BY TenMH, HocKy, Nhom"
             )
+            df = self._execute_sql(sql, params, slots.get("Limit", 50))
+            return df, sql, params, self._summary_message(df, "lớp học phần")
         sql = f"SELECT DISTINCT {columns}\nFROM {view}\n{where}\n{self._order_clause(slots, view)}"
         df = self._execute_sql(sql, params, slots.get("Limit", 50))
         return df, sql, params, self._summary_message(df, "lớp học phần")
@@ -908,14 +1229,18 @@ class VietnameseNL2SQLEngine:
     def _execute_schedule(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, str, Dict[str, Any], str]:
         where, params, _needs_lich = self._offering_filters(slots, force_schedule=True)
         sql = (
-            "SELECT DISTINCT MaLHP, TenMH, Nhom, ThuText, TietText, Buoi, MaPhong, "
-            "TenGV, TrangThaiLHP, SoChoCon\n"
+            "SELECT MaLHP, TenMH, Nhom, "
+            "GROUP_CONCAT(ThuText || ' ' || TietText || ' phong ' || MaPhong, '; ') AS LichKhop, "
+            "GROUP_CONCAT(DISTINCT Buoi) AS BuoiText, "
+            "GROUP_CONCAT(DISTINCT MaPhong) AS PhongText, "
+            "GROUP_CONCAT(DISTINCT TenGV) AS TenGV, TrangThaiLHP, MAX(SoChoCon) AS SoChoCon\n"
             "FROM v_lop_hoc_phan_lich\n"
             f"{where}\n"
-            f"{self._order_clause(slots, 'v_lop_hoc_phan_lich')}"
+            "GROUP BY MaLHP, TenMH, Nhom, TrangThaiLHP\n"
+            "ORDER BY MIN(Thu), MIN(TietBD), TenMH, Nhom"
         )
         df = self._execute_sql(sql, params, slots.get("Limit", 80))
-        return df, sql, params, self._summary_message(df, "buổi học")
+        return df, sql, params, self._summary_message(df, "lớp học phần")
 
     def _execute_course_info(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, str, Dict[str, Any], str]:
         conditions = []
@@ -996,10 +1321,11 @@ class VietnameseNL2SQLEngine:
     def _execute_prerequisite(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, str, Dict[str, Any], str]:
         params: Dict[str, Any] = {}
         if "MaSV" in slots and "MaMH" in slots:
+            result_source = passed_courses_source(self.conn)
             sql = (
                 "SELECT tq.MaMH, tq.TenMH, tq.MaMHTQ, tq.TenMHTQ\n"
                 "FROM v_tien_quyet_day_du tq\n"
-                "LEFT JOIN KetQua kq ON kq.MaSV = :ma_sv AND kq.MaMH = tq.MaMHTQ AND kq.KetQua = 'DAT'\n"
+                f"LEFT JOIN {result_source} kq ON kq.MaSV = :ma_sv AND kq.MaMH = tq.MaMHTQ AND kq.KetQua = 'DAT'\n"
                 "WHERE tq.MaMH = :ma_mh AND kq.MaMH IS NULL\n"
                 "ORDER BY tq.MaMHTQ"
             )
@@ -1089,11 +1415,12 @@ class VietnameseNL2SQLEngine:
         if "NamHoc" in slots:
             conditions.append("NamHoc = :nam_hoc")
             params["nam_hoc"] = slots["NamHoc"]
+        result_source = passed_courses_source(self.conn)
         sql = (
             "SELECT MaSV, HoTen, MaMH, TenMH, SoTC, NamHoc, HocKy, KetQua\n"
-            "FROM v_ket_qua_day_du\n"
+            f"FROM {result_source}\n"
             f"{self._where_clause(conditions)}\n"
-            f"{self._order_clause(slots, 'v_ket_qua_day_du')}"
+            f"{self._order_clause(slots, result_source)}"
         )
         df = self._execute_sql(sql, params, slots.get("Limit", 100))
         return df, sql, params, self._summary_message(df, "kết quả học tập")
@@ -1122,6 +1449,27 @@ class VietnameseNL2SQLEngine:
         )
         df = self._execute_sql(sql, params, slots.get("Limit", 100))
         return df, sql, params, self._summary_message(df, "dòng tổng hợp tín chỉ")
+
+    def _execute_recommendation(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any], str]:
+        ma_sv = slots.get("MaSV") or self.active_ma_sv
+        params: Dict[str, Any] = {}
+        if not ma_sv:
+            return pd.DataFrame(), None, params, "Cần sinh viên đang đăng nhập để gợi ý môn đăng ký."
+        nam_hoc = slots.get("NamHoc") or self.current_nam_hoc
+        hoc_ky = slots.get("HocKy") or self.current_hoc_ky
+        df = recommend_courses(
+            self.conn,
+            ma_sv=str(ma_sv),
+            nam_hoc=as_int(nam_hoc),
+            hoc_ky=as_int(hoc_ky),
+            limit=slots.get("Limit", 10),
+        )
+        sql = "-- recommendation_engine.recommend_courses(:ma_sv, :nam_hoc, :hoc_ky)"
+        params = {"ma_sv": str(ma_sv), "nam_hoc": nam_hoc, "hoc_ky": hoc_ky}
+        if df.empty:
+            return df, sql, params, "Chưa tìm thấy môn phù hợp để gợi ý cho học kỳ hiện tại."
+        recommended_count = int((df["TrangThaiGoiY"] == "GOI_Y").sum()) if "TrangThaiGoiY" in df else len(df)
+        return df, sql, params, f"Gợi ý {recommended_count} môn/lớp phù hợp dựa trên CTĐT, kết quả học tập và lớp mở kỳ hiện tại."
 
     def _execute_eligibility(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any], str]:
         ma_sv = slots.get("MaSV")
@@ -1437,6 +1785,7 @@ class VietnameseNL2SQLEngine:
             },
             "v_dang_ky_day_du": {"TGDK", "TenMH", "SoTC", "HocKy", "MaLHP"},
             "v_ket_qua_day_du": {"TenMH", "SoTC", "HocKy", "NamHoc"},
+            "v_ket_qua_tot_nhat_sv": {"TenMH", "SoTC", "HocKy", "NamHoc", "DiemTongKet", "DiemHe4"},
             "v_tin_chi_dang_ky_sv": {"TongTinChiDangKy", "SoLopDaDangKy", "HocKy", "MaSV"},
         }
         if requested in allowed.get(view, set()):
@@ -1445,7 +1794,7 @@ class VietnameseNL2SQLEngine:
             return "ORDER BY Thu, TietBD, TenMH, Nhom"
         if view == "v_dang_ky_day_du":
             return "ORDER BY HocKy, TenMH, Nhom"
-        if view == "v_ket_qua_day_du":
+        if view in {"v_ket_qua_day_du", "v_ket_qua_tot_nhat_sv"}:
             return "ORDER BY NamHoc, HocKy, TenMH"
         if view == "v_tin_chi_dang_ky_sv":
             return "ORDER BY NamHoc, HocKy, MaSV"
@@ -1504,6 +1853,7 @@ COURSE_ALIASES: Dict[str, List[str]] = {
 
 
 MAJOR_ALIASES: Dict[str, List[str]] = {
+    "CNTT": ["cntt", "cong nghe thong tin", "it"],
     "10": ["cntt", "cong nghe thong tin", "it"],
     "19": ["kmt", "ky thuat may tinh", "cong nghe ky thuat may tinh", "may tinh"],
     "46": ["cdt", "co dien tu", "cong nghe ky thuat co dien tu", "mechatronics"],
