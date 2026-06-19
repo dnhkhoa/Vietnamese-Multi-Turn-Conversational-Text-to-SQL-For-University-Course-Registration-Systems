@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 
@@ -13,9 +13,13 @@ DEFAULT_OUTPUT_DB = PROJECT_ROOT / "data" / "ctdt_sis_v3.db"
 CURRENT_YEAR_KEY = "NAM_HOC_HIEN_TAI"
 CURRENT_TERM_KEY = "HOC_KY_HIEN_TAI"
 DYNAMIC_PROFILE_LABELS = ("TRUNG_LICH", "THIEU_TIEN_QUYET", "VUOT_TIN_CHI")
-TARGET_NULL_ACADEMIC_WARNING_STUDENTS = 1524
+TARGET_NULL_ACADEMIC_WARNING_RATIO = 0.78
 NO_MON_WARNING_DEBT_THRESHOLD = 1
-MIN_CURRENT_REGISTRATIONS_FOR_ACTIVE_STUDENTS = 1
+MIN_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 12
+TARGET_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 15
+MAX_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 18
+REALISTIC_TOTAL_CREDITS_TO_GRADUATE = 150
+NEAR_GRADUATION_CREDIT_RATIO = 0.85
 
 
 PROFILE_NOTES = {
@@ -96,6 +100,61 @@ def remove_strict_prerequisite_violations(conn: sqlite3.Connection) -> int:
     )
     conn.execute("DROP TABLE _v3_dang_ky_xoa")
     return len(rows)
+
+
+def semester_window_for(today: date) -> tuple[int, int, date, date]:
+    if 1 <= today.month <= 5:
+        return today.year, 1, date(today.year, 1, 5), date(today.year, 5, 31)
+    return today.year, 2, date(today.year, 6, 1), date(today.year, 12, 31)
+
+
+def refresh_system_semesters(conn: sqlite3.Connection, today: date | None = None) -> tuple[int, int]:
+    today = today or date.today()
+    current_year, current_term, current_start, current_end = semester_window_for(today)
+    semesters = [
+        (current_year, 1, date(current_year, 1, 5), date(current_year, 5, 31)),
+        (current_year, 2, date(current_year, 6, 1), date(current_year, 12, 31)),
+    ]
+    rows = []
+    for year, term, start, end in semesters:
+        is_current = year == current_year and term == current_term
+        if is_current:
+            status = "DANG_MO_DANG_KY"
+            open_flag = 1
+        elif end < current_start:
+            status = "DA_KET_THUC"
+            open_flag = 0
+        else:
+            status = "SAP_MO"
+            open_flag = 0
+        rows.append(
+            (
+                f"{year}-{term}",
+                year,
+                term,
+                f"Học kỳ {term} năm học {year}",
+                status,
+                open_flag,
+                start.isoformat(),
+                end.isoformat(),
+            )
+        )
+    conn.executemany(
+        """
+        INSERT INTO HocKyHeThong
+            (MaHocKy, NamHoc, HocKy, TenHocKy, TrangThai, DangMoDangKy, NgayBatDau, NgayKetThuc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(NamHoc, HocKy) DO UPDATE SET
+            MaHocKy = excluded.MaHocKy,
+            TenHocKy = excluded.TenHocKy,
+            TrangThai = excluded.TrangThai,
+            DangMoDangKy = excluded.DangMoDangKy,
+            NgayBatDau = excluded.NgayBatDau,
+            NgayKetThuc = excluded.NgayKetThuc
+        """,
+        rows,
+    )
+    return current_year, current_term
 
 
 def get_open_registration_semester(conn: sqlite3.Connection) -> sqlite3.Row:
@@ -280,6 +339,55 @@ def normalize_required_course_suggested_terms(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
+def normalize_curriculum_requirements(conn: sqlite3.Connection) -> tuple[int, int]:
+    credit_rows = conn.execute(
+        """
+        SELECT MaCTDT
+        FROM CTDT
+        WHERE TongTinChiToiThieu IS NULL
+           OR TongTinChiToiThieu > 180
+        """
+    ).fetchall()
+    conn.execute(
+        """
+        UPDATE CTDT
+        SET TongTinChiToiThieu = ?
+        WHERE TongTinChiToiThieu IS NULL
+           OR TongTinChiToiThieu > 180
+        """,
+        (REALISTIC_TOTAL_CREDITS_TO_GRADUATE,),
+    )
+
+    group_rows = conn.execute(
+        """
+        SELECT MaCTDT, MaNhomTC
+        FROM CTDT_NhomTuChon
+        WHERE HocKyGoiY IS NULL
+        """
+    ).fetchall()
+    conn.execute(
+        """
+        UPDATE CTDT_NhomTuChon
+        SET HocKyGoiY = COALESCE(
+            (
+                SELECT CAST(ROUND(AVG(cm.HKGoiY)) AS INTEGER)
+                FROM CTDT_MonHoc cm
+                WHERE cm.MaCTDT = CTDT_NhomTuChon.MaCTDT
+                  AND cm.MaNhomTC = CTDT_NhomTuChon.MaNhomTC
+                  AND cm.HKGoiY IS NOT NULL
+            ),
+            CASE
+                WHEN MaNhomTC LIKE '%HK1%' THEN 1
+                WHEN MaNhomTC LIKE '%HK2%' THEN 2
+                ELSE 7
+            END
+        )
+        WHERE HocKyGoiY IS NULL
+        """
+    )
+    return len(credit_rows), len(group_rows)
+
+
 def _schedule_conflicts(
     existing: list[tuple[int, int, int]],
     candidate: list[tuple[int, int, int]],
@@ -291,7 +399,7 @@ def _schedule_conflicts(
     return False
 
 
-def ensure_active_students_have_current_registrations(conn: sqlite3.Connection) -> int:
+def balance_current_registrations(conn: sqlite3.Connection) -> int:
     open_semester = get_open_registration_semester(conn)
     year = int(open_semester["NamHoc"])
     term = int(open_semester["HocKy"])
@@ -372,17 +480,8 @@ def ensure_active_students_have_current_registrations(conn: sqlite3.Connection) 
         JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
         JOIN HoSoHocTapSinhVien hs ON hs.MaSV = sv.MaSV
         WHERE sv.TrangThai = 'DANG_HOC'
-          AND (
-              SELECT COUNT(*)
-              FROM DangKy dk
-              JOIN LopHP lhp ON lhp.MaLHP = dk.MaLHP
-              WHERE dk.MaSV = sv.MaSV
-                AND lhp.NamHoc = ?
-                AND lhp.HocKy = ?
-          ) < ?
         ORDER BY sv.MaSV
         """,
-        (year, term, MIN_CURRENT_REGISTRATIONS_FOR_ACTIVE_STUDENTS),
     ).fetchall()
 
     inserted: list[tuple[str, str, str]] = []
@@ -391,6 +490,8 @@ def ensure_active_students_have_current_registrations(conn: sqlite3.Connection) 
         ma_ctdt = student["MaCTDT"]
         credit_limit = int(student["GioiHanTinChi"])
         current_credits = int(student["TinChiDangKyHienTai"])
+        if current_credits >= MIN_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS:
+            continue
         suggested_stage = max(1, min(8, int(student["TinChiTichLuy"] or 0) // 20 + 1))
         allowed_courses = {
             row["MaMH"]: row
@@ -435,33 +536,41 @@ def ensure_active_students_have_current_registrations(conn: sqlite3.Connection) 
                 (ma_sv, year, year, term),
             ).fetchall()
         }
-        candidate_rows = sorted(
-            (
-                row
-                for row in classes
-                if row["MaMH"] in allowed_courses
-                and row["MaMH"] not in current_courses[ma_sv]
-                and row["MaMH"] not in passed_courses
-                and row["MaMH"] not in missing_prereq_courses
-                and current_counts[row["MaLHP"]] < int(row["SiSoTD"])
-                and current_credits + int(row["SoTC"]) <= credit_limit
-                and not _schedule_conflicts(current_schedules[ma_sv], class_schedules[row["MaLHP"]])
-            ),
-            key=lambda row: (
-                abs(int(allowed_courses[row["MaMH"]]["HKGoiY"]) - suggested_stage),
-                0 if allowed_courses[row["MaMH"]]["LoaiYC"] == "BAT_BUOC" else 1,
-                current_counts[row["MaLHP"]],
-                row["MaLHP"],
-            ),
-        )
-        if not candidate_rows:
-            continue
-        selected = candidate_rows[0]
-        tgdk = f"{year}-06-20 09:{len(inserted) % 60:02d}:00"
-        inserted.append((ma_sv, selected["MaLHP"], tgdk))
-        current_counts[selected["MaLHP"]] += 1
-        current_courses[ma_sv].add(selected["MaMH"])
-        current_schedules[ma_sv].extend(class_schedules[selected["MaLHP"]])
+        while current_credits < MIN_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS:
+            max_credits = min(credit_limit, MAX_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS)
+            candidate_rows = []
+            for allow_improvement in (False, True):
+                candidate_rows = sorted(
+                    (
+                        row
+                        for row in classes
+                        if row["MaMH"] in allowed_courses
+                        and row["MaMH"] not in current_courses[ma_sv]
+                        and (allow_improvement or row["MaMH"] not in passed_courses)
+                        and row["MaMH"] not in missing_prereq_courses
+                        and current_counts[row["MaLHP"]] < int(row["SiSoTD"])
+                        and current_credits + int(row["SoTC"]) <= max_credits
+                        and not _schedule_conflicts(current_schedules[ma_sv], class_schedules[row["MaLHP"]])
+                    ),
+                    key=lambda row: (
+                        1 if row["MaMH"] in passed_courses else 0,
+                        abs(int(allowed_courses[row["MaMH"]]["HKGoiY"]) - suggested_stage),
+                        0 if allowed_courses[row["MaMH"]]["LoaiYC"] == "BAT_BUOC" else 1,
+                        current_counts[row["MaLHP"]],
+                        row["MaLHP"],
+                    ),
+                )
+                if candidate_rows:
+                    break
+            if not candidate_rows:
+                break
+            selected = candidate_rows[0]
+            tgdk = f"{year}-06-20 09:{len(inserted) % 60:02d}:00"
+            inserted.append((ma_sv, selected["MaLHP"], tgdk))
+            current_counts[selected["MaLHP"]] += 1
+            current_courses[ma_sv].add(selected["MaMH"])
+            current_schedules[ma_sv].extend(class_schedules[selected["MaLHP"]])
+            current_credits += int(selected["SoTC"])
 
     conn.executemany(
         """
@@ -534,12 +643,108 @@ def next_term(year: int, term: int) -> tuple[int, int]:
     return year + 1, 1
 
 
+def previous_term(year: int, term: int) -> tuple[int, int]:
+    if term == 2:
+        return year, 1
+    return year - 1, 2
+
+
+def normalize_academic_timeline(conn: sqlite3.Connection) -> tuple[int, int, int]:
+    open_semester = get_open_registration_semester(conn)
+    open_year = int(open_semester["NamHoc"])
+    open_term = int(open_semester["HocKy"])
+    prev_year, prev_term = previous_term(open_year, open_term)
+
+    moved_synthetic_rows = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM KetQuaHocTap
+        WHERE KetQua IN ('DAT', 'KHONG_DAT')
+          AND (NamHoc > ? OR (NamHoc = ? AND HocKy >= ?))
+          AND MaLHP IS NULL
+          AND LoaiHoc = 'HOC_LAI'
+        """,
+        (open_year, open_year, open_term),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        UPDATE KetQuaHocTap
+        SET NamHoc = ?,
+            HocKy = ?,
+            GhiChu = 'Bổ sung kết quả học lại đạt để cân bằng dữ liệu nợ môn v3; đã đưa về học kỳ quá khứ hợp lệ.'
+        WHERE KetQua IN ('DAT', 'KHONG_DAT')
+          AND (NamHoc > ? OR (NamHoc = ? AND HocKy >= ?))
+          AND MaLHP IS NULL
+          AND LoaiHoc = 'HOC_LAI'
+        """,
+        (prev_year, prev_term, open_year, open_year, open_term),
+    )
+
+    deleted_completed_rows = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM KetQuaHocTap
+        WHERE KetQua IN ('DAT', 'KHONG_DAT')
+          AND (NamHoc > ? OR (NamHoc = ? AND HocKy >= ?))
+        """,
+        (open_year, open_year, open_term),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        DELETE FROM KetQuaHocTap
+        WHERE KetQua IN ('DAT', 'KHONG_DAT')
+          AND (NamHoc > ? OR (NamHoc = ? AND HocKy >= ?))
+        """,
+        (open_year, open_year, open_term),
+    )
+
+    deleted_study_rows = conn.execute(
+        "SELECT COUNT(*) FROM KetQuaHocTap WHERE KetQua = 'DANG_HOC'",
+    ).fetchone()[0]
+    conn.execute("DELETE FROM KetQuaHocTap WHERE KetQua = 'DANG_HOC'")
+    return int(moved_synthetic_rows), int(deleted_completed_rows), int(deleted_study_rows)
+
+
+def rebuild_ketqua_summary(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM KetQua")
+    conn.execute(
+        """
+        INSERT INTO KetQua (MaSV, MaMH, NamHoc, HocKy, KetQua)
+        SELECT MaSV, MaMH, NamHoc, HocKy, KetQua
+        FROM (
+            SELECT
+                kq.MaSV,
+                kq.MaMH,
+                kq.NamHoc,
+                kq.HocKy,
+                kq.KetQua,
+                ROW_NUMBER() OVER (
+                    PARTITION BY kq.MaSV, kq.MaMH
+                    ORDER BY
+                        CASE WHEN kq.KetQua = 'DAT' THEN 1 ELSE 0 END DESC,
+                        kq.NamHoc DESC,
+                        kq.HocKy DESC,
+                        kq.KetQuaID DESC
+                ) AS rn
+            FROM KetQuaHocTap kq
+            WHERE kq.KetQua IN ('DAT', 'KHONG_DAT')
+        )
+        WHERE rn = 1
+        """
+    )
+
+
 def rebalance_academic_debt(conn: sqlite3.Connection) -> int:
+    open_semester = get_open_registration_semester(conn)
+    open_year = int(open_semester["NamHoc"])
+    open_term = int(open_semester["HocKy"])
+    prev_year, prev_term = previous_term(open_year, open_term)
     total_students = conn.execute("SELECT COUNT(*) FROM HoSoHocTapSinhVien").fetchone()[0]
     low_gpa_students = conn.execute(
         "SELECT COUNT(*) FROM HoSoHocTapSinhVien WHERE GPA < 2.0",
     ).fetchone()[0]
-    keep_debt_count = max(0, total_students - low_gpa_students - TARGET_NULL_ACADEMIC_WARNING_STUDENTS)
+    target_null_students = round(total_students * TARGET_NULL_ACADEMIC_WARNING_RATIO)
+    keep_debt_count = max(0, total_students - low_gpa_students - target_null_students)
 
     conn.execute("DROP TABLE IF EXISTS _v3_debt_course")
     conn.execute(
@@ -550,14 +755,17 @@ def rebalance_academic_debt(conn: sqlite3.Connection) -> int:
         JOIN HoSoHocTapSinhVien hs ON fail.MaSV = hs.MaSV
         WHERE hs.GPA >= 2.0
           AND fail.KetQua = 'KHONG_DAT'
+          AND (fail.NamHoc < ? OR (fail.NamHoc = ? AND fail.HocKy < ?))
           AND NOT EXISTS (
               SELECT 1
               FROM KetQuaHocTap pass
               WHERE pass.MaSV = fail.MaSV
                 AND pass.MaMH = fail.MaMH
                 AND pass.KetQua = 'DAT'
+                AND (pass.NamHoc < ? OR (pass.NamHoc = ? AND pass.HocKy < ?))
           )
-        """
+        """,
+        (open_year, open_year, open_term, open_year, open_year, open_term),
     )
     conn.execute("CREATE INDEX idx_v3_debt_course_sv_mh ON _v3_debt_course(MaSV, MaMH)")
 
@@ -622,28 +830,33 @@ def rebalance_academic_debt(conn: sqlite3.Connection) -> int:
                 FROM KetQuaHocTap k2
                 WHERE k2.MaSV = r.MaSV
                   AND k2.MaMH = r.MaMH
+                  AND (k2.NamHoc < ? OR (k2.NamHoc = ? AND k2.HocKy < ?))
                 ORDER BY k2.NamHoc DESC, k2.HocKy DESC, k2.KetQuaID DESC
                 LIMIT 1
-            ), 2026) AS LastNamHoc,
+            ), ?) AS LastNamHoc,
             COALESCE((
                 SELECT k2.HocKy
                 FROM KetQuaHocTap k2
                 WHERE k2.MaSV = r.MaSV
                   AND k2.MaMH = r.MaMH
+                  AND (k2.NamHoc < ? OR (k2.NamHoc = ? AND k2.HocKy < ?))
                 ORDER BY k2.NamHoc DESC, k2.HocKy DESC, k2.KetQuaID DESC
                 LIMIT 1
-            ), 1) AS LastHocKy
+            ), ?) AS LastHocKy
         FROM _v3_resolved_debt_course r
         LEFT JOIN KetQuaHocTap kq
           ON r.MaSV = kq.MaSV
          AND r.MaMH = kq.MaMH
         GROUP BY r.MaSV, r.MaMH
         ORDER BY r.MaSV, r.MaMH
-        """
+        """,
+        (open_year, open_year, open_term, prev_year, open_year, open_year, open_term, prev_term),
     ).fetchall()
     attempts = []
     for row in rows:
         year, term = next_term(int(row["LastNamHoc"]), int(row["LastHocKy"]))
+        if year > open_year or (year == open_year and term >= open_term):
+            year, term = prev_year, prev_term
         attempts.append((row["MaSV"], row["MaMH"], int(row["NewLanHoc"]), year, term))
     conn.executemany(
         """
@@ -710,6 +923,9 @@ def rebalance_academic_debt(conn: sqlite3.Connection) -> int:
 
 
 def recalculate_academic_profile_metrics(conn: sqlite3.Connection) -> None:
+    open_semester = get_open_registration_semester(conn)
+    open_year = int(open_semester["NamHoc"])
+    open_term = int(open_semester["HocKy"])
     conn.execute("DROP TABLE IF EXISTS _v3_pass_best")
     conn.execute(
         """
@@ -717,8 +933,10 @@ def recalculate_academic_profile_metrics(conn: sqlite3.Connection) -> None:
         SELECT kq.MaSV, kq.MaMH, MAX(COALESCE(kq.DiemHe4, 0)) AS BestDiemHe4
         FROM KetQuaHocTap kq
         WHERE kq.KetQua = 'DAT'
+          AND (kq.NamHoc < ? OR (kq.NamHoc = ? AND kq.HocKy < ?))
         GROUP BY kq.MaSV, kq.MaMH
-        """
+        """,
+        (open_year, open_year, open_term),
     )
     conn.execute("CREATE INDEX idx_v3_pass_best_sv ON _v3_pass_best(MaSV)")
     conn.execute("DROP TABLE IF EXISTS _v3_pass_agg")
@@ -743,8 +961,10 @@ def recalculate_academic_profile_metrics(conn: sqlite3.Connection) -> None:
         SELECT MaSV, COUNT(DISTINCT MaMH) AS SoMonTungRot
         FROM KetQuaHocTap
         WHERE KetQua = 'KHONG_DAT'
+          AND (NamHoc < ? OR (NamHoc = ? AND HocKy < ?))
         GROUP BY MaSV
-        """
+        """,
+        (open_year, open_year, open_term),
     )
     conn.execute("CREATE INDEX idx_v3_fail_agg_sv ON _v3_fail_agg(MaSV)")
     conn.execute("DROP TABLE IF EXISTS _v3_repeat_agg")
@@ -755,8 +975,10 @@ def recalculate_academic_profile_metrics(conn: sqlite3.Connection) -> None:
         FROM KetQuaHocTap
         WHERE LanHoc > 1
           AND LoaiHoc IN ('HOC_LAI', 'CAI_THIEN')
+          AND (NamHoc < ? OR (NamHoc = ? AND HocKy < ?))
         GROUP BY MaSV
-        """
+        """,
+        (open_year, open_year, open_term),
     )
     conn.execute("CREATE INDEX idx_v3_repeat_agg_sv ON _v3_repeat_agg(MaSV)")
     conn.execute(
@@ -777,21 +999,28 @@ def recalculate_academic_profile_metrics(conn: sqlite3.Connection) -> None:
 
 
 def normalize_student_profiles(conn: sqlite3.Connection) -> None:
-    placeholders = ",".join("?" for _ in DYNAMIC_PROFILE_LABELS)
+    open_semester = get_open_registration_semester(conn)
+    open_year = int(open_semester["NamHoc"])
+    open_term = int(open_semester["HocKy"])
     conn.execute(
-        f"""
+        """
         UPDATE HoSoHocTapSinhVien
         SET NhomHoSo = CASE
-            WHEN TinChiTichLuy >= 220 THEN 'GAN_TOT_NGHIEP'
-            WHEN GPA >= 3.2 THEN 'DIEM_TB_CAO'
             WHEN GPA < 2.0 THEN 'DIEM_TB_THAP'
-            WHEN SoMonTungRot >= 10 OR SoLanHocLaiCaiThien >= 3 THEN 'HOC_LAI_NHIEU'
+            WHEN GPA >= 3.2 THEN 'DIEM_TB_CAO'
+            WHEN TinChiTichLuy >= (
+                SELECT CAST(ROUND(ctdt.TongTinChiToiThieu * ?) AS INTEGER)
+                FROM SinhVien sv
+                JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
+                JOIN CTDT ctdt ON ctdt.MaCTDT = kh.MaCTDT
+                WHERE sv.MaSV = HoSoHocTapSinhVien.MaSV
+            ) THEN 'GAN_TOT_NGHIEP'
+            WHEN SoMonTungRot >= 8 OR SoLanHocLaiCaiThien >= 4 THEN 'HOC_LAI_NHIEU'
+            WHEN SoLanHocLaiCaiThien > 0 THEN 'CAI_THIEN_DIEM'
             ELSE 'DUNG_TIEN_DO'
-        END,
-        GhiChu = 'Nhóm hồ sơ ổn định được tính lại từ GPA, tín chỉ tích lũy và lịch sử học lại; các trạng thái động được kiểm tra qua view điều kiện đăng ký.'
-        WHERE NhomHoSo IN ({placeholders})
+        END
         """,
-        DYNAMIC_PROFILE_LABELS,
+        (NEAR_GRADUATION_CREDIT_RATIO,),
     )
     conn.execute("DROP TABLE IF EXISTS _v3_mon_con_no")
     conn.execute(
@@ -800,15 +1029,18 @@ def normalize_student_profiles(conn: sqlite3.Connection) -> None:
         SELECT fail.MaSV, COUNT(DISTINCT fail.MaMH) AS SoMonConNo
         FROM KetQuaHocTap fail
         WHERE fail.KetQua = 'KHONG_DAT'
+          AND (fail.NamHoc < ? OR (fail.NamHoc = ? AND fail.HocKy < ?))
           AND NOT EXISTS (
               SELECT 1
               FROM KetQuaHocTap pass
               WHERE pass.MaSV = fail.MaSV
                 AND pass.MaMH = fail.MaMH
                 AND pass.KetQua = 'DAT'
+                AND (pass.NamHoc < ? OR (pass.NamHoc = ? AND pass.HocKy < ?))
           )
         GROUP BY fail.MaSV
-        """
+        """,
+        (open_year, open_year, open_term, open_year, open_year, open_term),
     )
     conn.execute("CREATE INDEX idx_v3_mon_con_no_masv ON _v3_mon_con_no(MaSV)")
     conn.execute(
@@ -854,6 +1086,154 @@ def normalize_student_profiles(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("DROP TABLE _v3_mon_con_no")
+
+
+def normalize_graduation_status(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT sv.MaSV
+        FROM SinhVien sv
+        JOIN HoSoHocTapSinhVien hs ON hs.MaSV = sv.MaSV
+        JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
+        JOIN CTDT ctdt ON ctdt.MaCTDT = kh.MaCTDT
+        WHERE sv.TrangThai = 'DA_TOT_NGHIEP'
+          AND (
+              hs.CanhBaoHocVu IS NOT NULL
+              OR hs.TinChiTichLuy < ctdt.TongTinChiToiThieu
+          )
+        """
+    ).fetchall()
+    conn.execute(
+        """
+        UPDATE SinhVien
+        SET TrangThai = 'DANG_HOC'
+        WHERE TrangThai = 'DA_TOT_NGHIEP'
+          AND EXISTS (
+              SELECT 1
+              FROM HoSoHocTapSinhVien hs
+              JOIN KhoaHoc kh ON kh.MaKhoaHoc = SinhVien.MaKhoaHoc
+              JOIN CTDT ctdt ON ctdt.MaCTDT = kh.MaCTDT
+              WHERE hs.MaSV = SinhVien.MaSV
+                AND (
+                    hs.CanhBaoHocVu IS NOT NULL
+                    OR hs.TinChiTichLuy < ctdt.TongTinChiToiThieu
+                )
+          )
+        """
+    )
+    return len(rows)
+
+
+def suspend_active_students_without_current_registration(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT sv.MaSV
+        FROM SinhVien sv
+        WHERE sv.TrangThai = 'DANG_HOC'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM DangKy dk
+              JOIN LopHP lhp ON lhp.MaLHP = dk.MaLHP
+              JOIN HocKyHeThong hk
+                ON hk.NamHoc = lhp.NamHoc
+               AND hk.HocKy = lhp.HocKy
+               AND hk.DangMoDangKy = 1
+              WHERE dk.MaSV = sv.MaSV
+          )
+        """
+    ).fetchall()
+    conn.execute(
+        """
+        UPDATE SinhVien
+        SET TrangThai = 'TAM_NGUNG'
+        WHERE TrangThai = 'DANG_HOC'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM DangKy dk
+              JOIN LopHP lhp ON lhp.MaLHP = dk.MaLHP
+              JOIN HocKyHeThong hk
+                ON hk.NamHoc = lhp.NamHoc
+               AND hk.HocKy = lhp.HocKy
+               AND hk.DangMoDangKy = 1
+              WHERE dk.MaSV = SinhVien.MaSV
+          )
+        """
+    )
+    return len(rows)
+
+
+def sync_current_study_rows(conn: sqlite3.Connection) -> int:
+    open_semester = get_open_registration_semester(conn)
+    open_year = int(open_semester["NamHoc"])
+    open_term = int(open_semester["HocKy"])
+    conn.execute("DELETE FROM KetQuaHocTap WHERE KetQua = 'DANG_HOC'")
+    created_at = datetime.now().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        INSERT INTO KetQuaHocTap
+            (
+                MaSV, MaMH, MaLHP, LanHoc, NamHoc, HocKy,
+                DiemQuaTrinh, DiemThi, DiemTongKet, DiemChu, DiemHe4,
+                KetQua, LoaiHoc, GhiChu, ThoiDiemTao
+            )
+        SELECT
+            dk.MaSV,
+            lhp.MaMH,
+            dk.MaLHP,
+            COALESCE((
+                SELECT MAX(prev.LanHoc)
+                FROM KetQuaHocTap prev
+                WHERE prev.MaSV = dk.MaSV
+                  AND prev.MaMH = lhp.MaMH
+                  AND prev.KetQua IN ('DAT', 'KHONG_DAT')
+                  AND (prev.NamHoc < lhp.NamHoc OR (prev.NamHoc = lhp.NamHoc AND prev.HocKy < lhp.HocKy))
+            ), 0) + 1,
+            lhp.NamHoc,
+            lhp.HocKy,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            'DANG_HOC',
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM KetQuaHocTap prev
+                    WHERE prev.MaSV = dk.MaSV
+                      AND prev.MaMH = lhp.MaMH
+                      AND prev.KetQua = 'DAT'
+                      AND (prev.NamHoc < lhp.NamHoc OR (prev.NamHoc = lhp.NamHoc AND prev.HocKy < lhp.HocKy))
+                ) THEN 'CAI_THIEN'
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM KetQuaHocTap prev
+                    WHERE prev.MaSV = dk.MaSV
+                      AND prev.MaMH = lhp.MaMH
+                      AND prev.KetQua = 'KHONG_DAT'
+                      AND (prev.NamHoc < lhp.NamHoc OR (prev.NamHoc = lhp.NamHoc AND prev.HocKy < lhp.HocKy))
+                ) THEN 'HOC_LAI'
+                ELSE 'HOC_MOI'
+            END,
+            'Đăng ký hiện tại',
+            ?
+        FROM DangKy dk
+        JOIN LopHP lhp ON lhp.MaLHP = dk.MaLHP
+        WHERE lhp.NamHoc = ?
+          AND lhp.HocKy = ?
+        """,
+        (created_at, open_year, open_term),
+    )
+    return conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM KetQuaHocTap
+        WHERE KetQua = 'DANG_HOC'
+          AND NamHoc = ?
+          AND HocKy = ?
+        """,
+        (open_year, open_term),
+    ).fetchone()[0]
 
 
 def rebuild_current_registration_view(conn: sqlite3.Connection) -> None:
@@ -1045,26 +1425,48 @@ def upsert_metadata(
     conn: sqlite3.Connection,
     removed_prereq_count: int,
     removed_non_current_count: int,
+    moved_future_synthetic_count: int,
+    deleted_future_completed_count: int,
+    deleted_stale_study_count: int,
     resolved_debt_count: int,
     filled_hk_goi_y_count: int,
+    normalized_ctdt_credit_count: int,
+    filled_group_hk_count: int,
+    normalized_graduation_count: int,
     added_current_registration_count: int,
+    suspended_without_registration_count: int,
+    synced_current_study_count: int,
 ) -> None:
+    target_null_students = round(
+        conn.execute("SELECT COUNT(*) FROM HoSoHocTapSinhVien").fetchone()[0]
+        * TARGET_NULL_ACADEMIC_WARNING_RATIO
+    )
     rows = [
         ("PHIEN_BAN_CSDL", "ctdt_sis_v3"),
         ("THOI_DIEM_TAO_V3", datetime.now().isoformat(timespec="seconds")),
         ("SCRIPT_TAO_V3", "scripts/ctdt_sis_v3.py"),
         ("V3_SO_DANG_KY_XOA_DO_TIEN_QUYET", str(removed_prereq_count)),
         ("V3_SO_DANG_KY_XOA_NGOAI_HOC_KY_HIEN_TAI", str(removed_non_current_count)),
+        ("V3_SO_KQHT_TUONG_LAI_SYNTHETIC_DUA_VE_QUA_KHU", str(moved_future_synthetic_count)),
+        ("V3_SO_KQHT_HIEN_TAI_TUONG_LAI_XOA", str(deleted_future_completed_count)),
+        ("V3_SO_KQHT_DANG_HOC_CU_XOA", str(deleted_stale_study_count)),
         ("V3_SO_KET_QUA_HOC_LAI_DAT_BO_SUNG", str(resolved_debt_count)),
         ("V3_SO_MON_BAT_BUOC_BO_SUNG_HK_GOI_Y", str(filled_hk_goi_y_count)),
+        ("V3_SO_CTDT_CHUAN_HOA_TONG_TIN_CHI", str(normalized_ctdt_credit_count)),
+        ("V3_SO_NHOM_TU_CHON_BO_SUNG_HK_GOI_Y", str(filled_group_hk_count)),
+        ("V3_SO_SINH_VIEN_TOT_NGHIEP_CHUYEN_VE_DANG_HOC", str(normalized_graduation_count)),
         ("V3_SO_DANG_KY_HIEN_TAI_BO_SUNG", str(added_current_registration_count)),
-        ("V3_MUC_TIEU_SINH_VIEN_KHONG_CANH_BAO", str(TARGET_NULL_ACADEMIC_WARNING_STUDENTS)),
+        ("V3_SO_SINH_VIEN_DANG_HOC_CHUYEN_TAM_NGUNG_DO_KHONG_CO_DANG_KY", str(suspended_without_registration_count)),
+        ("V3_SO_KQHT_DANG_HOC_DONG_BO_TU_DANG_KY", str(synced_current_study_count)),
+        ("V3_TI_LE_MUC_TIEU_SINH_VIEN_KHONG_CANH_BAO", str(TARGET_NULL_ACADEMIC_WARNING_RATIO)),
+        ("V3_MUC_TIEU_SINH_VIEN_KHONG_CANH_BAO", str(target_null_students)),
         (
             "V3_NOI_DUNG_CHUAN_HOA",
             "Xoa dang ky sai tien quyet; tinh lai si so/tin chi; chuan hoa KetQuaHocTap; "
-            "bo sung ket qua hoc lai dat de can bang no mon; bo nhan dong khoi NhomHoSo; "
-            "chi giu DangKy cua hoc ky dang mo; bo sung dang ky hop le cho sinh vien dang hoc; "
-            "dong bo GhiChu va HKGoiY; rebuild view hien tai va dieu kien dang ky.",
+            "xoa ket qua hien tai/tuong lai; dong bo DANG_HOC tu DangKy; "
+            "bo sung ket qua hoc lai dat de can bang no mon theo ty le; "
+            "chuan hoa NhomHoSo/GhiChu/trang thai tot nghiep; "
+            "can bang tin chi DangKy hien tai; rebuild view hien tai va dieu kien dang ky.",
         ),
         (
             "V3_LOGIC_CANH_BAO_NO_MON",
@@ -1126,7 +1528,7 @@ def validate(conn: sqlite3.Connection) -> None:
                   AND hk.TrangThai = 'DANG_MO_DANG_KY'
             )
         """,
-        "sinh_vien_dang_hoc_chua_dang_ky_hien_tai": f"""
+        "sinh_vien_dang_hoc_chua_dang_ky_hien_tai": """
             SELECT sv.MaSV
             FROM SinhVien sv
             WHERE sv.TrangThai = 'DANG_HOC'
@@ -1143,13 +1545,132 @@ def validate(conn: sqlite3.Connection) -> None:
                           AND hk.DangMoDangKy = 1
                           AND hk.TrangThai = 'DANG_MO_DANG_KY'
                     )
-              ) < {MIN_CURRENT_REGISTRATIONS_FOR_ACTIVE_STUDENTS}
+              ) < 1
+        """,
+        "sinh_vien_dang_hoc_tin_chi_thap_qua_nhieu": f"""
+            SELECT sv.MaSV
+            FROM SinhVien sv
+            JOIN HoSoHocTapSinhVien hs ON hs.MaSV = sv.MaSV
+            WHERE sv.TrangThai = 'DANG_HOC'
+              AND hs.TinChiDangKyHienTai < {MIN_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS}
+            LIMIT (
+                SELECT CASE
+                    WHEN (
+                        SELECT COUNT(*)
+                        FROM SinhVien sv2
+                        JOIN HoSoHocTapSinhVien hs2 ON hs2.MaSV = sv2.MaSV
+                        WHERE sv2.TrangThai = 'DANG_HOC'
+                          AND hs2.TinChiDangKyHienTai < {MIN_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS}
+                    ) <= (
+                        SELECT CAST(COUNT(*) * 0.3 AS INTEGER)
+                        FROM SinhVien
+                        WHERE TrangThai = 'DANG_HOC'
+                    )
+                    THEN 0
+                    ELSE 1
+                END
+            )
         """,
         "ctdt_required_missing_hk_goi_y": """
             SELECT MaCTDT, MaMH
             FROM CTDT_MonHoc
             WHERE LoaiYC = 'BAT_BUOC'
               AND HKGoiY IS NULL
+        """,
+        "ctdt_elective_group_missing_hk_goi_y": """
+            SELECT MaCTDT, MaNhomTC
+            FROM CTDT_NhomTuChon
+            WHERE HocKyGoiY IS NULL
+        """,
+        "ket_qua_hoan_tat_o_hoc_ky_hien_tai_tuong_lai": """
+            SELECT kq.KetQuaID
+            FROM KetQuaHocTap kq
+            WHERE kq.KetQua IN ('DAT', 'KHONG_DAT')
+              AND EXISTS (
+                  SELECT 1
+                  FROM HocKyHeThong hk
+                  WHERE hk.DangMoDangKy = 1
+                    AND (
+                        kq.NamHoc > hk.NamHoc
+                        OR (kq.NamHoc = hk.NamHoc AND kq.HocKy >= hk.HocKy)
+                    )
+              )
+        """,
+        "ket_qua_dang_hoc_ngoai_hoc_ky_hien_tai": """
+            SELECT kq.KetQuaID
+            FROM KetQuaHocTap kq
+            WHERE kq.KetQua = 'DANG_HOC'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM HocKyHeThong hk
+                  WHERE hk.DangMoDangKy = 1
+                    AND hk.NamHoc = kq.NamHoc
+                    AND hk.HocKy = kq.HocKy
+              )
+        """,
+        "dang_ky_thieu_ket_qua_dang_hoc": """
+            SELECT dk.MaSV, dk.MaLHP
+            FROM DangKy dk
+            JOIN LopHP lhp ON lhp.MaLHP = dk.MaLHP
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM KetQuaHocTap kq
+                WHERE kq.MaSV = dk.MaSV
+                  AND kq.MaLHP = dk.MaLHP
+                  AND kq.MaMH = lhp.MaMH
+                  AND kq.KetQua = 'DANG_HOC'
+            )
+        """,
+        "ket_qua_dang_hoc_khong_co_dang_ky": """
+            SELECT kq.KetQuaID
+            FROM KetQuaHocTap kq
+            WHERE kq.KetQua = 'DANG_HOC'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM DangKy dk
+                  WHERE dk.MaSV = kq.MaSV
+                    AND dk.MaLHP = kq.MaLHP
+              )
+        """,
+        "ketqua_summary_mismatch": """
+            WITH best AS (
+              SELECT MaSV, MaMH, NamHoc, HocKy, KetQua
+              FROM (
+                SELECT
+                    MaSV,
+                    MaMH,
+                    NamHoc,
+                    HocKy,
+                    KetQua,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY MaSV, MaMH
+                        ORDER BY
+                            CASE WHEN KetQua = 'DAT' THEN 1 ELSE 0 END DESC,
+                            NamHoc DESC,
+                            HocKy DESC,
+                            KetQuaID DESC
+                    ) AS rn
+                FROM KetQuaHocTap
+                WHERE KetQua IN ('DAT', 'KHONG_DAT')
+              )
+              WHERE rn = 1
+            )
+            SELECT k.MaSV, k.MaMH
+            FROM KetQua k
+            JOIN best b ON b.MaSV = k.MaSV AND b.MaMH = k.MaMH
+            WHERE k.NamHoc <> b.NamHoc
+               OR k.HocKy <> b.HocKy
+               OR k.KetQua <> b.KetQua
+            UNION ALL
+            SELECT b.MaSV, b.MaMH
+            FROM best b
+            LEFT JOIN KetQua k ON k.MaSV = b.MaSV AND k.MaMH = b.MaMH
+            WHERE k.MaSV IS NULL
+            UNION ALL
+            SELECT k.MaSV, k.MaMH
+            FROM KetQua k
+            LEFT JOIN best b ON b.MaSV = k.MaSV AND b.MaMH = k.MaMH
+            WHERE b.MaSV IS NULL
         """,
         "ghi_chu_canh_bao_no_mon_mismatch": """
             SELECT MaSV
@@ -1168,6 +1689,33 @@ def validate(conn: sqlite3.Connection) -> None:
             FROM HoSoHocTapSinhVien
             WHERE NhomHoSo IN ({','.join(repr(x) for x in DYNAMIC_PROFILE_LABELS)})
         """,
+        "nhom_ho_so_mismatch": """
+            SELECT hs.MaSV
+            FROM HoSoHocTapSinhVien hs
+            JOIN SinhVien sv ON sv.MaSV = hs.MaSV
+            JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
+            JOIN CTDT ctdt ON ctdt.MaCTDT = kh.MaCTDT
+            WHERE hs.NhomHoSo <> CASE
+                WHEN hs.GPA < 2.0 THEN 'DIEM_TB_THAP'
+                WHEN hs.GPA >= 3.2 THEN 'DIEM_TB_CAO'
+                WHEN hs.TinChiTichLuy >= CAST(ROUND(ctdt.TongTinChiToiThieu * 0.85) AS INTEGER) THEN 'GAN_TOT_NGHIEP'
+                WHEN hs.SoMonTungRot >= 8 OR hs.SoLanHocLaiCaiThien >= 4 THEN 'HOC_LAI_NHIEU'
+                WHEN hs.SoLanHocLaiCaiThien > 0 THEN 'CAI_THIEN_DIEM'
+                ELSE 'DUNG_TIEN_DO'
+            END
+        """,
+        "sinh_vien_tot_nghiep_khong_hop_le": """
+            SELECT sv.MaSV
+            FROM SinhVien sv
+            JOIN HoSoHocTapSinhVien hs ON hs.MaSV = sv.MaSV
+            JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
+            JOIN CTDT ctdt ON ctdt.MaCTDT = kh.MaCTDT
+            WHERE sv.TrangThai = 'DA_TOT_NGHIEP'
+              AND (
+                  hs.CanhBaoHocVu IS NOT NULL
+                  OR hs.TinChiTichLuy < ctdt.TongTinChiToiThieu
+              )
+        """,
         "lan_hoc_order_error": """
             SELECT *
             FROM (
@@ -1185,12 +1733,30 @@ def validate(conn: sqlite3.Connection) -> None:
               SELECT fail.MaSV, COUNT(DISTINCT fail.MaMH) AS SoMonConNo
               FROM KetQuaHocTap fail
               WHERE fail.KetQua = 'KHONG_DAT'
+                AND EXISTS (
+                  SELECT 1
+                  FROM HocKyHeThong hk
+                  WHERE hk.DangMoDangKy = 1
+                    AND (
+                        fail.NamHoc < hk.NamHoc
+                        OR (fail.NamHoc = hk.NamHoc AND fail.HocKy < hk.HocKy)
+                    )
+                )
                 AND NOT EXISTS (
                   SELECT 1
                   FROM KetQuaHocTap pass
                   WHERE pass.MaSV = fail.MaSV
                     AND pass.MaMH = fail.MaMH
                     AND pass.KetQua = 'DAT'
+                    AND EXISTS (
+                      SELECT 1
+                      FROM HocKyHeThong hk
+                      WHERE hk.DangMoDangKy = 1
+                        AND (
+                            pass.NamHoc < hk.NamHoc
+                            OR (pass.NamHoc = hk.NamHoc AND pass.HocKy < hk.HocKy)
+                        )
+                    )
                 )
               GROUP BY fail.MaSV
             )
@@ -1206,13 +1772,20 @@ def validate(conn: sqlite3.Connection) -> None:
               ''
             )
         """,
-        "target_null_academic_warning_count": f"""
+        "target_null_academic_warning_ratio": f"""
             SELECT MaSV
             FROM HoSoHocTapSinhVien
-            WHERE CanhBaoHocVu IS NULL
+            WHERE CanhBaoHocVu IS NOT NULL
             LIMIT (
                 SELECT CASE
-                    WHEN (SELECT COUNT(*) FROM HoSoHocTapSinhVien WHERE CanhBaoHocVu IS NULL) = {TARGET_NULL_ACADEMIC_WARNING_STUDENTS}
+                    WHEN (
+                        SELECT COUNT(*)
+                        FROM HoSoHocTapSinhVien
+                        WHERE CanhBaoHocVu IS NULL
+                    ) BETWEEN
+                        CAST((SELECT COUNT(*) FROM HoSoHocTapSinhVien) * ({TARGET_NULL_ACADEMIC_WARNING_RATIO} - 0.03) AS INTEGER)
+                        AND
+                        CAST((SELECT COUNT(*) FROM HoSoHocTapSinhVien) * ({TARGET_NULL_ACADEMIC_WARNING_RATIO} + 0.03) AS INTEGER)
                     THEN 0
                     ELSE 1
                 END
@@ -1231,27 +1804,45 @@ def migrate(db_path: Path) -> None:
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("BEGIN")
+        refresh_system_semesters(conn)
         sync_current_registration_config(conn)
         removed_non_current_count = remove_non_current_registrations(conn)
         removed_prereq_count = remove_strict_prerequisite_violations(conn)
         filled_hk_goi_y_count = normalize_required_course_suggested_terms(conn)
+        normalized_ctdt_credit_count, filled_group_hk_count = normalize_curriculum_requirements(conn)
+        moved_future_synthetic_count, deleted_future_completed_count, deleted_stale_study_count = normalize_academic_timeline(conn)
         recalculate_registration_derived_fields(conn)
         normalize_learning_attempts(conn)
+        rebuild_ketqua_summary(conn)
+        recalculate_academic_profile_metrics(conn)
         resolved_debt_count = rebalance_academic_debt(conn)
         normalize_learning_attempts(conn)
+        rebuild_ketqua_summary(conn)
         recalculate_academic_profile_metrics(conn)
         normalize_student_profiles(conn)
-        added_current_registration_count = ensure_active_students_have_current_registrations(conn)
+        normalized_graduation_count = normalize_graduation_status(conn)
+        added_current_registration_count = balance_current_registrations(conn)
+        suspended_without_registration_count = suspend_active_students_without_current_registration(conn)
         recalculate_registration_derived_fields(conn)
+        synced_current_study_count = sync_current_study_rows(conn)
+        normalize_learning_attempts(conn)
         rebuild_current_registration_view(conn)
         rebuild_registration_eligibility_view(conn)
         upsert_metadata(
             conn,
             removed_prereq_count,
             removed_non_current_count,
+            moved_future_synthetic_count,
+            deleted_future_completed_count,
+            deleted_stale_study_count,
             resolved_debt_count,
             filled_hk_goi_y_count,
+            normalized_ctdt_credit_count,
+            filled_group_hk_count,
+            normalized_graduation_count,
             added_current_registration_count,
+            suspended_without_registration_count,
+            synced_current_study_count,
         )
         validate(conn)
         conn.commit()
