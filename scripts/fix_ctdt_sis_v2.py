@@ -9,8 +9,9 @@ from collections import defaultdict
 from pathlib import Path
 
 
-DEFAULT_SOURCE = Path("ctdt_sis_v2.db")
-DEFAULT_OUTPUT = Path("ctdt_sis_v2_fixed.db")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SOURCE = PROJECT_ROOT / "data" / "ctdt_sis_v2.db"
+DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "ctdt_sis_v2_fixed.db"
 
 
 COURSE_RENAMES = {

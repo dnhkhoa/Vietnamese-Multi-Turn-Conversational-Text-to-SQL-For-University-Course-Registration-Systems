@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "course_registration.db"
-DEFAULT_VIEWS_PATH = PROJECT_ROOT / "views.sql"
+DEFAULT_VIEWS_PATH = PROJECT_ROOT / "data" / "views.sql"
 MAX_CREDITS_PER_SEMESTER = 28
 
 

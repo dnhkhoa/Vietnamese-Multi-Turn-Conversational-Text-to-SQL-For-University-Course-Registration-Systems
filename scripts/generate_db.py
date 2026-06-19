@@ -11,7 +11,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 # cau hinh
 
 DEFAULT_SEED = 42
-DEFAULT_VIEWS_PATH = Path(__file__).resolve().with_name("views.sql")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_VIEWS_PATH = PROJECT_ROOT / "data" / "views.sql"
 
 ACADEMIC_YEAR = 2026
 ADMISSION_YEAR = 2023
