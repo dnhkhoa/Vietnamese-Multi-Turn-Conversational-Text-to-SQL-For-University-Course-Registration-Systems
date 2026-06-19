@@ -233,6 +233,33 @@ class StateParserError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class QwenMemoryProfile:
+    model_label: str
+    min_vram_gb: float
+
+
+def qwen_memory_profile(base_model: str) -> QwenMemoryProfile:
+    match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)\s*b", base_model, flags=re.IGNORECASE)
+    if not match:
+        return QwenMemoryProfile(model_label=base_model or "Qwen adapter", min_vram_gb=7.0)
+
+    size_b = float(match.group(1))
+    if size_b <= 0.7:
+        min_vram_gb = 2.0
+    elif size_b <= 1.7:
+        min_vram_gb = 3.0
+    elif size_b <= 3.5:
+        min_vram_gb = 4.0
+    elif size_b <= 7.5:
+        min_vram_gb = 7.0
+    else:
+        min_vram_gb = max(7.0, size_b)
+
+    size_label = match.group(1).rstrip("0").rstrip(".")
+    return QwenMemoryProfile(model_label=f"Qwen2.5 Coder {size_label}B", min_vram_gb=min_vram_gb)
+
+
 def compact_previous_state(previous_state: Dict[str, Any]) -> Dict[str, Any]:
     if not previous_state:
         return {}
@@ -415,22 +442,27 @@ class QwenStateParser:
             base = config.get("base_model_name_or_path")
             if base:
                 return str(base)
-        return "Qwen/Qwen2.5-Coder-7B-Instruct"
+        return "Qwen/Qwen2.5-Coder-3B-Instruct"
 
-    @staticmethod
-    def _preflight_runtime() -> None:
+    def _preflight_runtime(self) -> None:
         try:
             import torch
         except ImportError:
             return
-        if not torch.cuda.is_available():
+        self._check_gpu_vram(torch)
+
+    def _check_gpu_vram(self, torch_module: Any) -> None:
+        if os.getenv("NL2SQL_FORCE_LOW_VRAM") == "1":
             return
-        total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        if total_vram_gb < 7 and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
+        if not torch_module.cuda.is_available():
+            return
+        profile = qwen_memory_profile(self.base_model)
+        total_vram_gb = torch_module.cuda.get_device_properties(0).total_memory / (1024**3)
+        if total_vram_gb < profile.min_vram_gb:
             raise StateParserError(
-                f"Qwen2.5 7B adapter needs more GPU memory than this local GPU appears to have "
-                f"({total_vram_gb:.1f} GB). Use Kaggle/Colab/T4+, a smaller adapter, or set "
-                "NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
+                f"{profile.model_label} adapter needs about {profile.min_vram_gb:.1f} GB GPU memory for local "
+                f"4-bit inference, but this local GPU appears to have {total_vram_gb:.1f} GB. Use a smaller "
+                "adapter, run the parser remotely, or set NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
             )
 
     def _load(self) -> None:
@@ -447,14 +479,7 @@ class QwenStateParser:
 
         self._torch = torch
         local_files_only = os.getenv("NL2SQL_ALLOW_MODEL_DOWNLOAD") != "1"
-        if torch.cuda.is_available():
-            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            if total_vram_gb < 7 and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
-                raise StateParserError(
-                    f"Qwen2.5 7B adapter needs more GPU memory than this local GPU appears to have "
-                    f"({total_vram_gb:.1f} GB). Use Kaggle/Colab/T4+, a smaller adapter, or set "
-                    "NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
-                )
+        self._check_gpu_vram(torch)
 
         self._tokenizer = AutoTokenizer.from_pretrained(
             self.adapter_path,
@@ -463,7 +488,9 @@ class QwenStateParser:
         )
 
         model_kwargs: Dict[str, Any] = {"trust_remote_code": True}
-        if torch.cuda.is_available():
+        if not torch.cuda.is_available():
+            model_kwargs.update({"device_map": None, "torch_dtype": torch.float32})
+        else:
             model_kwargs.update({"device_map": "auto", "torch_dtype": torch.float16})
             try:
                 from transformers import BitsAndBytesConfig
@@ -476,8 +503,6 @@ class QwenStateParser:
                 )
             except Exception:
                 pass
-        else:
-            model_kwargs.update({"device_map": None, "torch_dtype": torch.float32})
 
         base = AutoModelForCausalLM.from_pretrained(
             self.base_model,
