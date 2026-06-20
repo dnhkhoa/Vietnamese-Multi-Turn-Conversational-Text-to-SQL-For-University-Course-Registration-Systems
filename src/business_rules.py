@@ -9,14 +9,13 @@ from typing import Any, Dict, Iterable, List, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_LOCAL_FIXED_DB_PATH = PROJECT_ROOT.parent / "ctdt_sis_v2_fixed.db"
 DEFAULT_DB_PATH = Path(
     os.getenv(
         "COURSE_REGISTRATION_DB_PATH",
-        str(_LOCAL_FIXED_DB_PATH if _LOCAL_FIXED_DB_PATH.exists() else PROJECT_ROOT / "data" / "course_registration.db"),
+        str(PROJECT_ROOT / "data" / "course_registration.db"),
     )
 )
-DEFAULT_VIEWS_PATH = PROJECT_ROOT / "views.sql"
+DEFAULT_VIEWS_PATH = PROJECT_ROOT / "data" / "views.sql"
 MAX_CREDITS_PER_SEMESTER = 28
 
 
