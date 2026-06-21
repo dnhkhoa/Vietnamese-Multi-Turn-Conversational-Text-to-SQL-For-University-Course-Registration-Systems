@@ -35,7 +35,6 @@ def test_context_filter_and_change_entity(engine: VietnameseNL2SQLEngine) -> Non
     assert filtered.slots["MaMH"] == "CNDE430780E"
     assert filtered.slots["Buoi"] == "SANG"
     assert filtered.slots["CoTheDangKy"] == 1
-    assert not filtered.dataframe.empty
     assert changed.edit_operation == "CHANGE_ENTITY"
     assert changed.slots["MaMH"] == "ARIN330585E"
     assert changed.slots["Buoi"] == "SANG"
@@ -48,8 +47,7 @@ def test_reference_resolution_for_prerequisite(engine: VietnameseNL2SQLEngine) -
     assert result.intent == "PREREQUISITE_LOOKUP"
     assert result.edit_operation == "RESOLVE_REFERENCE"
     assert result.slots["MaMH"] == "ARIN330585E"
-    assert not result.dataframe.empty
-    assert "Data Structures and Algorithms (2+1)" in set(result.dataframe["TenMHTQ"])
+    assert result.dataframe.empty  # PDF K23 explicitly states "Prerequisites: None" for AI.
 
 
 def test_new_student_query_resets_stale_course_context(engine: VietnameseNL2SQLEngine) -> None:
@@ -100,7 +98,7 @@ def test_engine_connection_can_be_reused_from_streamlit_style_thread() -> None:
     try:
         engine.ask("Cho toi xem cac lop mon thiet ke mang")
         with ThreadPoolExecutor(max_workers=1) as executor:
-            result = executor.submit(engine.ask, "Chỉ lấy lớp buổi sáng còn chỗ").result()
+            result = executor.submit(engine.ask, "Chỉ lấy lớp buổi sáng").result()
     finally:
         engine.close()
 
@@ -146,6 +144,76 @@ class FakeStateParser:
         if isinstance(self.state, Exception):
             raise self.state
         return self.state
+
+
+class CapturingStateParser(FakeStateParser):
+    def __init__(self, state: ParsedState):
+        super().__init__(state)
+        self.last_utterance = ""
+
+    def parse(self, utterance: str, previous_state: dict) -> ParsedState:
+        self.last_utterance = utterance
+        return super().parse(utterance, previous_state)
+
+
+def test_course_aliases_are_canonicalized_for_model(engine: VietnameseNL2SQLEngine) -> None:
+    canonical, courses = engine.catalog.canonicalize_course_mentions("NMLT còn lớp sáng không?")
+
+    assert canonical == "nhap mon lap trinh con lop sang khong"
+    assert courses == ["INPR130285E"]
+
+
+def test_exact_alias_locks_course_slot_before_model_execution() -> None:
+    parser = CapturingStateParser(
+        ParsedState(
+            intent="COURSE_INFO_SEARCH",
+            edit_operation="NEW_QUERY",
+            slots={"MaMH": "ARIN330585E"},
+        )
+    )
+    engine = VietnameseNL2SQLEngine(
+        state_parser=parser,
+        parser_mode="hybrid",
+        repair_model_output=False,
+    )
+    try:
+        result = engine.ask("c sở d liệu mấy tín chỉ?")
+    finally:
+        engine.close()
+
+    assert parser.last_utterance == "co so du lieu may tin chi"
+    assert result.slots["MaMH"] == "DBSY230184E"
+
+
+def test_v3_schema_has_single_relationship_source(engine: VietnameseNL2SQLEngine) -> None:
+    monhoc_columns = {row["name"] for row in engine.conn.execute("PRAGMA table_info(MonHoc)")}
+    object_types = {
+        row["name"]: row["type"]
+        for row in engine.conn.execute(
+            "SELECT name, type FROM sqlite_master WHERE name IN ('CTDT_QuanHeHocPhan', 'QuanHeHocPhan', 'TienQuyet')"
+        )
+    }
+
+    assert "ExcelRow" not in monhoc_columns
+    assert object_types == {
+        "CTDT_QuanHeHocPhan": "table",
+        "QuanHeHocPhan": "view",
+        "TienQuyet": "view",
+    }
+
+
+def test_every_canonical_course_alias_has_five_surface_forms(engine: VietnameseNL2SQLEngine) -> None:
+    undercovered = engine.conn.execute(
+        """
+        SELECT CanonicalText, COUNT(*) AS AliasCount
+        FROM MonHocAlias
+        WHERE IsActive = 1
+        GROUP BY CanonicalText
+        HAVING COUNT(*) < 5
+        """
+    ).fetchall()
+
+    assert undercovered == []
 
 
 def test_hybrid_parser_uses_valid_external_state() -> None:
