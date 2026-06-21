@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "course_registration.db"
-DEFAULT_VIEWS_PATH = PROJECT_ROOT / "views.sql"
+DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "ctdt_sis_v3.db"
+DEFAULT_VIEWS_PATH = PROJECT_ROOT / "data" / "views.sql"
 MAX_CREDITS_PER_SEMESTER = 28
 
 
@@ -245,6 +245,29 @@ def check_registration_eligibility(
     ma_lhp: str,
     max_credits: int = MAX_CREDITS_PER_SEMESTER,
 ) -> RowDict:
+    canonical = _fetch_one(
+        conn,
+        """
+        SELECT
+            MaSV, HoTen, TrangThaiSV, MaLHP, MaMH, TenMH, Nhom,
+            NamHoc, HocKy, SoTC, TrangThaiLHP, SiSoDK, SiSoTD, SoChoCon,
+            TinChiHienTai, TinChiSauDangKy, SoMonTienQuyetThieu,
+            SoLopTrungLich, SoLopCungMonDaDangKy, CoTheDangKy,
+            LyDoKhongDangKy
+        FROM v_dieu_kien_dang_ky_mon_sv
+        WHERE MaSV = :ma_sv
+          AND MaLHP = :ma_lhp
+        """,
+        {"ma_sv": ma_sv, "ma_lhp": ma_lhp},
+    )
+    if canonical is not None:
+        reasons = canonical.get("LyDoKhongDangKy") or ""
+        canonical["LyDoKhongDangKy"] = [item for item in reasons.split("|") if item]
+        canonical["MonTienQuyetThieu"] = get_missing_prerequisites(conn, ma_sv, canonical["MaMH"])
+        canonical["LopTrungLich"] = get_schedule_conflicts(conn, ma_sv, ma_lhp)
+        canonical["LopCungMonDaDangKy"] = get_same_course_registrations(conn, ma_sv, ma_lhp)
+        return canonical
+
     student = get_student(conn, ma_sv)
     offering = get_offering(conn, ma_lhp)
 
@@ -326,8 +349,14 @@ def find_eligible_offerings_for_course(
     hoc_ky: Optional[int] = None,
     max_credits: int = MAX_CREDITS_PER_SEMESTER,
 ) -> List[RowDict]:
-    params: Dict[str, Any] = {"ma_mh": ma_mh}
-    filters = ["MaMH = :ma_mh", "TrangThaiLHP = 'MO'", "SoChoCon > 0"]
+    params: Dict[str, Any] = {"ma_sv": ma_sv, "ma_mh": ma_mh}
+    filters = [
+        "MaSV = :ma_sv",
+        "MaMH = :ma_mh",
+        "TrangThaiLHP = 'MO'",
+        "SoChoCon > 0",
+        "CoTheDangKy = 1",
+    ]
     if nam_hoc is not None:
         filters.append("NamHoc = :nam_hoc")
         params["nam_hoc"] = nam_hoc
@@ -335,27 +364,24 @@ def find_eligible_offerings_for_course(
         filters.append("HocKy = :hoc_ky")
         params["hoc_ky"] = hoc_ky
 
-    candidates = _fetch_all(
+    eligible = _fetch_all(
         conn,
         f"""
-        SELECT MaLHP
-        FROM v_lop_hoc_phan_day_du
+        SELECT
+            MaSV, HoTen, TrangThaiSV, MaLHP, MaMH, TenMH, Nhom,
+            NamHoc, HocKy, SoTC, TrangThaiLHP, SiSoDK, SiSoTD, SoChoCon,
+            TinChiHienTai, TinChiSauDangKy, SoMonTienQuyetThieu,
+            SoLopTrungLich, SoLopCungMonDaDangKy, CoTheDangKy,
+            LyDoKhongDangKy
+        FROM v_dieu_kien_dang_ky_mon_sv
         WHERE {' AND '.join(filters)}
         ORDER BY SoChoCon DESC, Nhom ASC
         """,
         params,
     )
-
-    eligible = []
-    for row in candidates:
-        result = check_registration_eligibility(
-            conn,
-            ma_sv=ma_sv,
-            ma_lhp=row["MaLHP"],
-            max_credits=max_credits,
-        )
-        if result["CoTheDangKy"] == 1:
-            eligible.append(result)
+    for row in eligible:
+        reasons = row.get("LyDoKhongDangKy") or ""
+        row["LyDoKhongDangKy"] = [item for item in reasons.split("|") if item]
     return eligible
 
 

@@ -9,6 +9,14 @@ __pycache__/
 .ipynb_checkpoints/
 *.zip
 
+# Generated project databases and local review drafts
+/data/course_registration.db
+/data/ctdt.db
+/data/ctdt_sis.db
+/data/*.db.tmp
+/data/*.db.tmp-journal
+/docs/ctdt_sis_design_proposal.md
+
 # Temporary, remove from gitignore later.
 notebooks
 
@@ -33,3 +41,6 @@ viedu-unsloth-local/outputs/logs/*
 
 # Root duplicate from Colab; canonical notebook is under viedu-unsloth-local/notebooks.
 /viedu_unsloth_colab_qwen3b.ipynb
+
+/docs/*.docx
+/references/
