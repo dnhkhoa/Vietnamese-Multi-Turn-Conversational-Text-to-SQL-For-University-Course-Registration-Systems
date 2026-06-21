@@ -15,6 +15,7 @@ from src.nl2sql_engine import QueryResult, VietnameseNL2SQLEngine
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_SIS_DB_PATH = PROJECT_ROOT / "data" / "ctdt_sis_v3.db"
 DEFAULT_LORA_CANDIDATES = [
+    PROJECT_ROOT / "models" / "qwen3b-lora-state-tracking",
     PROJECT_ROOT / "models" / "qwen3b-nl2sql-state-lora",
     PROJECT_ROOT / "models" / "qwen-nl2sql-state-lora-3b",
     PROJECT_ROOT / "models" / "qwen-nl2sql-state-lora",
