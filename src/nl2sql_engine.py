@@ -425,7 +425,30 @@ class VietnameseNL2SQLEngine:
         slots = dict(parsed.slots)
         norm = normalize_text(user_text)
         has_reference = self._has_reference(norm)
-        if has_reference and previous is not None:
+        intent = parsed.intent
+        edit_operation = parsed.edit_operation
+        rule_intent = rule_parsed.get("intent") if rule_parsed is not None else None
+        rule_edit = rule_parsed.get("edit_operation") if rule_parsed is not None else None
+        context_edit = edit_operation in {
+            "ADD_FILTER",
+            "REMOVE_FILTER",
+            "REPLACE_FILTER",
+            "CHANGE_ENTITY",
+            "SORT",
+            "LIMIT",
+            "RESOLVE_REFERENCE",
+            "AGGREGATE",
+        } or rule_edit in {
+            "ADD_FILTER",
+            "REMOVE_FILTER",
+            "REPLACE_FILTER",
+            "CHANGE_ENTITY",
+            "SORT",
+            "LIMIT",
+            "RESOLVE_REFERENCE",
+            "AGGREGATE",
+        }
+        if previous is not None and (has_reference or context_edit):
             merged_slots = dict(previous.slots)
             merged_slots.update(slots)
             slots = merged_slots
@@ -462,21 +485,44 @@ class VietnameseNL2SQLEngine:
         if generic_course_query:
             extracted.pop("MaMH", None)
             extracted.pop("TenMH", None)
-        for key in ["MaSV", "MaMH", "TenMH", "MaLHP", "MaNganh", "TenNganh", "HocKy", "NamHoc"]:
+        for key in [
+            "MaSV",
+            "MaMH",
+            "TenMH",
+            "MaMHList",
+            "MaLHP",
+            "MaNganh",
+            "TenNganh",
+            "HocKy",
+            "NamHoc",
+            "Buoi",
+            "CoTheDangKy",
+            "TrangThaiLHP",
+            "LoaiYC",
+            "PrereqDirection",
+            "Limit",
+            "SortBy",
+            "SortDirection",
+            "AggregationMetric",
+        ]:
             if key in extracted:
                 slots[key] = extracted[key]
+        if "MaMH" in extracted:
+            slots.pop("MaMHList", None)
 
-        intent = parsed.intent
-        edit_operation = parsed.edit_operation
         if rule_parsed is not None:
-            rule_intent = rule_parsed.get("intent")
-            rule_edit = rule_parsed.get("edit_operation")
+            if previous is not None and context_edit and rule_intent:
+                intent = rule_intent
+                if rule_edit:
+                    edit_operation = rule_edit
             if self._should_trust_rule_intent(norm, rule_intent, intent, has_reference):
                 intent = rule_intent
                 if rule_edit:
                     edit_operation = rule_edit
             if rule_edit and rule_edit != "NEW_QUERY" and (has_reference or edit_operation == "NEW_QUERY"):
                 edit_operation = rule_edit
+        if edit_operation == "REMOVE_FILTER":
+            slots = self._remove_requested_filters(norm, slots)
         slots = self._drop_stale_context_slots(norm, intent, slots, extracted)
 
         return {
@@ -502,6 +548,9 @@ class VietnameseNL2SQLEngine:
             "STUDENT_REGISTRATION_LOOKUP": ["da dang ky", "da dang ki", "dang ky nhung lop nao", "dang ki nhung lop nao"],
             "COURSE_RECOMMENDATION": ["nen dang ky", "nen dang ki", "goi y", "phu hop cho toi"],
             "PREREQUISITE_LOOKUP": ["tien quyet", "hoc truoc", "truoc khi hoc", "mon nao truoc", "nen hoc mon nao truoc"],
+            "COURSE_INFO_SEARCH": ["may tin chi", "so tin chi", "bao nhieu tin chi", "thong tin mon"],
+            "CURRICULUM_COURSE_SEARCH": ["nganh", "chuong trinh", "ctdt", "bat buoc", "tu chon"],
+            "AGGREGATION_STATISTICS": ["bao nhieu", "moi mon", "may lop", "co may", "dem", "thong ke"],
             "CREDIT_SUMMARY": ["tong tin chi", "bao nhieu tin chi da dang ky"],
         }
         return any(marker in norm for marker in high_confidence.get(rule_intent, []))
@@ -535,11 +584,12 @@ class VietnameseNL2SQLEngine:
                     cleaned.pop(key, None)
             has_explicit_course_or_class = (
                 "MaMH" in extracted_slots
+                or "MaMHList" in extracted_slots
                 or "MaLHP" in extracted_slots
                 or any(marker in norm for marker in ["mon nay", "mon do", "lhp"])
             )
             if not has_explicit_course_or_class:
-                for key in {"MaMH", "TenMH", "MaLHP"}:
+                for key in {"MaMH", "TenMH", "MaMHList", "MaLHP"}:
                     if key not in extracted_slots:
                         cleaned.pop(key, None)
             if intent == "STUDENT_RESULT_LOOKUP" and not any(marker in norm for marker in ["ky ", "ki ", "hoc ky", "hoc ki", "nam "]):
@@ -602,12 +652,17 @@ class VietnameseNL2SQLEngine:
                 slots.update({"MaMH": course["MaMH"], "TenMH": course["TenMH"]})
 
         course = self.catalog.match_course(user_text, allow_fuzzy=False)
-        if course is None:
+        if course is None and not self._has_reference(norm):
             course_phrase = self._extract_entity_phrase(norm, "mon")
             if course_phrase:
                 course = self.catalog.match_course(course_phrase, allow_fuzzy=True)
         if course:
             slots.update({"MaMH": course["MaMH"], "TenMH": course["TenMH"]})
+        courses = self._match_all_courses(norm)
+        if len(courses) > 1:
+            slots["MaMHList"] = [course_ref["MaMH"] for course_ref in courses]
+            slots.pop("MaMH", None)
+            slots.pop("TenMH", None)
 
         if self._should_match_major(norm):
             major = self.catalog.match_major(user_text, allow_fuzzy=False)
@@ -718,7 +773,41 @@ class VietnameseNL2SQLEngine:
             slots["SortBy"] = sort_by
             slots["SortDirection"] = sort_direction or slots.get("SortDirection", "ASC")
 
+        if self._has_aggregation_marker(norm):
+            if "sinh vien" in norm and "dang ky" in norm:
+                slots["AggregationMetric"] = "REGISTERED_STUDENTS"
+            elif "lop" in norm:
+                slots["AggregationMetric"] = "CLASS_COUNT"
+
         return slots
+
+    def _match_all_courses(self, norm: str) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for alias in sorted(self.catalog.course_aliases, key=len, reverse=True):
+            if not alias:
+                continue
+            if len(alias) <= 2 and not (
+                ("moi mon" in norm and "mon" in norm)
+                or ("voi mon" in norm and "mon" in norm)
+                or re.search(rf"\bmon\s+{re.escape(alias)}\b", norm)
+                or re.search(rf"\b{re.escape(alias)}\s*,", norm)
+                or re.search(rf",\s*{re.escape(alias)}\b", norm)
+                or re.search(rf"\b{re.escape(alias)}\s+va\b", norm)
+                or re.search(rf"\bva\s+{re.escape(alias)}\b", norm)
+            ):
+                continue
+            if not re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", norm):
+                continue
+            ma_mh = self.catalog.course_aliases[alias]
+            if ma_mh in seen:
+                continue
+            course = self.catalog.get_course(ma_mh)
+            if not course:
+                continue
+            seen.add(ma_mh)
+            matches.append(course)
+        return matches
 
     def _resolve_remembered_course(self, norm: str, previous: Optional[QueryContext]) -> Optional[str]:
         if previous is None:
@@ -815,7 +904,7 @@ class VietnameseNL2SQLEngine:
             "dau tien",
             "nay can hoc truoc mon gi",
         }
-        if phrase in generic_phrases:
+        if phrase in generic_phrases or phrase.startswith(("o ", "do ", "nay ", "nao ")):
             return None
         if not phrase or len(phrase) < 3:
             return None
@@ -917,15 +1006,18 @@ class VietnameseNL2SQLEngine:
             return "RESOLVE_REFERENCE"
         if "sap" in norm:
             return "SORT"
-        if "chi lay" in norm and any(x in norm for x in ["buoi", "thu ", "con cho", "dang ky duoc", "mo"]):
+        if "chi lay" in norm and any(x in norm for x in ["buoi", "thu ", "con cho", "con slot", "slot", "dang ky duoc", "mo"]):
             return "ADD_FILTER"
-        if previous.intent and any(x in norm for x in ["chi hoc ky", "chi xem hoc ky", "loc hoc ky"]):
+        if previous.intent and (
+            any(x in norm for x in ["chi hoc ky", "chi xem hoc ky", "loc hoc ky"])
+            or ("chi xem" in norm and "hoc ky" in norm)
+        ):
             return "ADD_FILTER"
         if re.search(r"\b(?:lay|top|chi hien|hien|gioi han)\s*\d", norm) or "dau tien" in norm:
             return "LIMIT"
         if self._has_aggregation_marker(norm):
             return "AGGREGATE"
-        if any(x in norm for x in ["chi lay", "loc", "them dieu kien", "con cho", "buoi", "thu "]):
+        if any(x in norm for x in ["chi lay", "loc", "them dieu kien", "con cho", "con slot", "slot", "buoi", "thu "]):
             return "ADD_FILTER"
         return "NEW_QUERY"
 
@@ -1013,6 +1105,7 @@ class VietnameseNL2SQLEngine:
             "HoTen",
             "MaMH",
             "TenMH",
+            "MaMHList",
             "MaLHP",
             "PrereqDirection",
             "MaNganh",
@@ -1021,6 +1114,7 @@ class VietnameseNL2SQLEngine:
             "NamHoc",
             "HocKy",
             "Nhom",
+            "AggregationMetric",
         }
         return {k: v for k, v in slots.items() if k in reusable}
 
@@ -1110,7 +1204,7 @@ class VietnameseNL2SQLEngine:
             return "STUDENT_INFO_LOOKUP"
         if any(x in norm for x in ["chuong trinh", "ctdt", "nganh", "bat buoc", "tu chon"]) and "MaNganh" in slots:
             return "CURRICULUM_COURSE_SEARCH"
-        if any(x in norm for x in ["may tin chi", "so tin chi", "thuoc nganh", "thong tin mon"]):
+        if any(x in norm for x in ["may tin chi", "so tin chi", "bao nhieu tin chi", "thuoc nganh", "thong tin mon"]):
             return "COURSE_INFO_SEARCH"
         if any(x in norm for x in ["liet ke lop", "liet ke cac lop", "tim lop", "cho toi xem cac lop", "xem cac lop", "lop hoc phan", "lop mon"]):
             if self._has_schedule_marker(norm):
@@ -1248,6 +1342,15 @@ class VietnameseNL2SQLEngine:
         if "MaMH" in slots:
             conditions.append("MaMH = :ma_mh")
             params["ma_mh"] = slots["MaMH"]
+        if "MaMHList" in slots:
+            ma_mh_list = [str(value) for value in slots["MaMHList"] if value]
+            if ma_mh_list:
+                placeholders = []
+                for index, value in enumerate(ma_mh_list):
+                    key = f"ma_mh_{index}"
+                    placeholders.append(f":{key}")
+                    params[key] = value
+                conditions.append(f"MaMH IN ({', '.join(placeholders)})")
         if "SoTC" in slots:
             conditions.append("SoTC = :so_tc")
             params["so_tc"] = slots["SoTC"]
@@ -1591,12 +1694,21 @@ class VietnameseNL2SQLEngine:
             df = self._execute_sql(sql, params, slots.get("Limit", 20))
             return df, sql, params, self._summary_message(df, "dòng thống kê")
 
-        if "sinh vien" in norm and "dang ky" in norm:
+        if slots.get("AggregationMetric") == "REGISTERED_STUDENTS" or ("sinh vien" in norm and "dang ky" in norm):
             conditions = []
             params: Dict[str, Any] = {}
             if "MaMH" in slots:
                 conditions.append("MaMH = :ma_mh")
                 params["ma_mh"] = slots["MaMH"]
+            if "MaMHList" in slots:
+                ma_mh_list = [str(value) for value in slots["MaMHList"] if value]
+                if ma_mh_list:
+                    placeholders = []
+                    for index, value in enumerate(ma_mh_list):
+                        key = f"ma_mh_{index}"
+                        placeholders.append(f":{key}")
+                        params[key] = value
+                    conditions.append(f"MaMH IN ({', '.join(placeholders)})")
             if "HocKy" in slots:
                 conditions.append("HocKy = :hoc_ky")
                 params["hoc_ky"] = slots["HocKy"]
@@ -1643,21 +1755,43 @@ class VietnameseNL2SQLEngine:
             return df, sql, params, self._summary_message(df, "dòng thống kê")
 
         if "con cho" in norm:
+            conditions = ["CoTheDangKy = 1"]
+            params = {}
+            if "MaMH" in slots:
+                conditions.append("MaMH = :ma_mh")
+                params["ma_mh"] = slots["MaMH"]
+            if "MaMHList" in slots:
+                ma_mh_list = [str(value) for value in slots["MaMHList"] if value]
+                if ma_mh_list:
+                    placeholders = []
+                    for index, value in enumerate(ma_mh_list):
+                        key = f"ma_mh_{index}"
+                        placeholders.append(f":{key}")
+                        params[key] = value
+                    conditions.append(f"MaMH IN ({', '.join(placeholders)})")
             sql = (
                 "SELECT MaMH, TenMH, COUNT(*) AS SoLopConCho, SUM(SoChoCon) AS TongSoChoCon\n"
                 "FROM v_lop_hoc_phan_day_du\n"
-                "WHERE CoTheDangKy = 1\n"
+                f"{self._where_clause(conditions)}\n"
                 "GROUP BY MaMH, TenMH\n"
                 "ORDER BY TongSoChoCon DESC, TenMH"
             )
-            params = {}
             df = self._execute_sql(sql, params, slots.get("Limit", 20))
             return df, sql, params, self._summary_message(df, "dòng thống kê")
 
-        if "lop" in norm or "MaMH" in slots or "HocKy" in slots or "Buoi" in slots or "Thu" in slots:
-            if "moi mon" in norm or "theo tung mon" in norm or "tung mon" in norm or "MaMH" not in slots:
+        if "lop" in norm or "MaMH" in slots or "MaMHList" in slots or "HocKy" in slots or "Buoi" in slots or "Thu" in slots:
+            if "moi mon" in norm or "theo tung mon" in norm or "tung mon" in norm or "MaMHList" in slots or "MaMH" not in slots:
                 conditions = []
                 params = {}
+                if "MaMHList" in slots:
+                    ma_mh_list = [str(value) for value in slots["MaMHList"] if value]
+                    if ma_mh_list:
+                        placeholders = []
+                        for index, value in enumerate(ma_mh_list):
+                            key = f"ma_mh_{index}"
+                            placeholders.append(f":{key}")
+                            params[key] = value
+                        conditions.append(f"MaMH IN ({', '.join(placeholders)})")
                 if "HocKy" in slots:
                     conditions.append("HocKy = :hoc_ky")
                     params["hoc_ky"] = slots["HocKy"]

@@ -255,6 +255,10 @@ MODEL_COURSE_CODE_ALIASES = {
     "AI": "ARIN330585E",
     "AI580101E": "ARIN330585E",
     "ARIN": "ARIN330585E",
+    "ML": "MALE431085E",
+    "MALE": "MALE431085E",
+    "NLP": "NLPR431585E",
+    "NLPR": "NLPR431585E",
 }
 
 SLOT_VALUE_ALIASES = {
@@ -271,6 +275,16 @@ SLOT_VALUE_ALIASES = {
     ("CoTheDangKy", "FALSE"): 0,
     ("CoTheDangKy", "NO"): 0,
     ("CoTheDangKy", "FULL"): 0,
+    ("TrangThaiLHP", "OPEN"): "MO",
+    ("TrangThaiLHP", "OPENED"): "MO",
+    ("TrangThaiLHP", "AVAILABLE"): "MO",
+    ("TrangThaiLHP", "MO"): "MO",
+    ("TrangThaiLHP", "CLOSED"): "DONG",
+    ("TrangThaiLHP", "FULL"): "DAY",
+    ("LoaiYC", "REQUIRED"): "BAT_BUOC",
+    ("LoaiYC", "MANDATORY"): "BAT_BUOC",
+    ("LoaiYC", "ELECTIVE"): "TU_CHON",
+    ("LoaiYC", "OPTIONAL"): "TU_CHON",
 }
 
 
