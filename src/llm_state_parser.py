@@ -21,6 +21,7 @@ ALLOWED_INTENTS = {
     "COURSE_INFO_SEARCH",
     "CURRICULUM_COURSE_SEARCH",
     "STUDENT_INFO_LOOKUP",
+    "ACADEMIC_PROFILE_LOOKUP",
     "STUDENT_REGISTRATION_LOOKUP",
     "STUDENT_RESULT_LOOKUP",
     "CREDIT_SUMMARY",
@@ -83,6 +84,12 @@ INTENT_ALIASES = {
     "PROGRAM_COURSES": "CURRICULUM_COURSE_SEARCH",
     "STUDENT_INFO": "STUDENT_INFO_LOOKUP",
     "VIEW_STUDENT_INFO": "STUDENT_INFO_LOOKUP",
+    "ACADEMIC_PROFILE": "ACADEMIC_PROFILE_LOOKUP",
+    "ACADEMIC_PROGRESS": "ACADEMIC_PROFILE_LOOKUP",
+    "ACADEMIC_WARNING": "ACADEMIC_PROFILE_LOOKUP",
+    "STUDENT_ACADEMIC_PROFILE": "ACADEMIC_PROFILE_LOOKUP",
+    "STUDENT_PROGRESS": "ACADEMIC_PROFILE_LOOKUP",
+    "STUDENT_WARNING": "ACADEMIC_PROFILE_LOOKUP",
     "STUDENT_REGISTRATIONS": "STUDENT_REGISTRATION_LOOKUP",
     "STUDENT_REGISTRATION": "STUDENT_REGISTRATION_LOOKUP",
     "VIEW_STUDENT_REGISTRATION": "STUDENT_REGISTRATION_LOOKUP",
@@ -305,6 +312,33 @@ class ParsedState:
 
 class StateParserError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class QwenMemoryProfile:
+    model_label: str
+    min_vram_gb: float
+
+
+def qwen_memory_profile(base_model: str) -> QwenMemoryProfile:
+    match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)\s*b", base_model, flags=re.IGNORECASE)
+    if not match:
+        return QwenMemoryProfile(model_label=base_model or "Qwen adapter", min_vram_gb=7.0)
+
+    size_b = float(match.group(1))
+    if size_b <= 0.7:
+        min_vram_gb = 2.0
+    elif size_b <= 1.7:
+        min_vram_gb = 3.0
+    elif size_b <= 3.5:
+        min_vram_gb = 4.0
+    elif size_b <= 7.5:
+        min_vram_gb = 7.0
+    else:
+        min_vram_gb = max(7.0, size_b)
+
+    size_label = match.group(1).rstrip("0").rstrip(".")
+    return QwenMemoryProfile(model_label=f"Qwen2.5 Coder {size_label}B", min_vram_gb=min_vram_gb)
 
 
 def compact_previous_state(previous_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -740,34 +774,27 @@ class QwenStateParser:
             base = config.get("base_model_name_or_path")
             if base:
                 return str(base)
-        return "Qwen/Qwen2.5-Coder-7B-Instruct"
-
-    def _min_vram_gb(self) -> float:
-        name = self.base_model.lower()
-        if "1.5b" in name or "1_5b" in name:
-            return 3.5
-        if "3b" in name:
-            return 5.0
-        if "7b" in name:
-            return 7.0
-        if "14b" in name or "15b" in name:
-            return 12.0
-        return 7.0
+        return "Qwen/Qwen2.5-Coder-3B-Instruct"
 
     def _preflight_runtime(self) -> None:
         try:
             import torch
         except ImportError:
             return
-        if not torch.cuda.is_available():
+        self._check_gpu_vram(torch)
+
+    def _check_gpu_vram(self, torch_module: Any) -> None:
+        if os.getenv("NL2SQL_FORCE_LOW_VRAM") == "1":
             return
-        total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        min_vram_gb = self._min_vram_gb()
-        if total_vram_gb < min_vram_gb and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
+        if not torch_module.cuda.is_available():
+            return
+        profile = qwen_memory_profile(self.base_model)
+        total_vram_gb = torch_module.cuda.get_device_properties(0).total_memory / (1024**3)
+        if total_vram_gb < profile.min_vram_gb:
             raise StateParserError(
-                f"{self.base_model} needs about {min_vram_gb:.1f} GB VRAM, but this GPU appears to have "
-                f"({total_vram_gb:.1f} GB). Use Kaggle/Colab/T4+, a smaller adapter, or set "
-                "NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
+                f"{profile.model_label} adapter needs about {profile.min_vram_gb:.1f} GB GPU memory for local "
+                f"4-bit inference, but this local GPU appears to have {total_vram_gb:.1f} GB. Use a smaller "
+                "adapter, run the parser remotely, or set NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
             )
 
     def _load(self) -> None:
@@ -786,15 +813,7 @@ class QwenStateParser:
 
         self._torch = torch
         local_files_only = os.getenv("NL2SQL_ALLOW_MODEL_DOWNLOAD") != "1"
-        if torch.cuda.is_available():
-            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            min_vram_gb = self._min_vram_gb()
-            if total_vram_gb < min_vram_gb and os.getenv("NL2SQL_FORCE_LOW_VRAM") != "1":
-                raise StateParserError(
-                    f"{self.base_model} needs about {min_vram_gb:.1f} GB VRAM, but this GPU appears to have "
-                    f"({total_vram_gb:.1f} GB). Use Kaggle/Colab/T4+, a smaller adapter, or set "
-                    "NL2SQL_FORCE_LOW_VRAM=1 to try anyway."
-                )
+        self._check_gpu_vram(torch)
 
         self._tokenizer = AutoTokenizer.from_pretrained(
             self.adapter_path,
@@ -807,7 +826,9 @@ class QwenStateParser:
                 self._tokenizer.chat_template = template_path.read_text(encoding="utf-8")
 
         model_kwargs: Dict[str, Any] = {"trust_remote_code": True}
-        if torch.cuda.is_available():
+        if not torch.cuda.is_available():
+            model_kwargs.update({"device_map": None, "torch_dtype": torch.float32})
+        else:
             model_kwargs.update({"device_map": "auto", "torch_dtype": torch.float16})
             try:
                 from transformers import BitsAndBytesConfig
@@ -820,8 +841,6 @@ class QwenStateParser:
                 )
             except Exception:
                 pass
-        else:
-            model_kwargs.update({"device_map": None, "torch_dtype": torch.float32})
 
         base = AutoModelForCausalLM.from_pretrained(
             self.base_model,

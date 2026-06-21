@@ -5,6 +5,7 @@ import sqlite3
 import threading
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import date
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
@@ -620,10 +621,16 @@ class VietnameseNL2SQLEngine:
             "cac mon",
             "sinh vien ",
             "sinh vien nao",
+            "mon ",
             "mon nao",
             "moi mon",
         ]
-        if any(marker in norm for marker in reset_markers) and not self._has_reference(norm):
+        change_markers = ["doi sang", "chuyen sang", "thay bang"]
+        if (
+            any(marker in norm for marker in reset_markers)
+            and not self._has_reference(norm)
+            and not any(marker in norm for marker in change_markers)
+        ):
             return {}
         return dict(previous.slots)
 
@@ -672,6 +679,10 @@ class VietnameseNL2SQLEngine:
                     major = self.catalog.match_major(major_phrase, allow_fuzzy=True)
             if major:
                 slots.update({"MaNganh": major["MaNganh"], "TenNganh": major["TenNganh"]})
+
+        current_term = self._extract_current_term(norm)
+        if current_term is not None:
+            slots.update(current_term)
 
         hoc_ky = self._extract_semester(norm)
         if self._is_current_term_reference(norm):
@@ -840,6 +851,41 @@ class VietnameseNL2SQLEngine:
             return int(match.group(1))
         return None
 
+    def _extract_current_term(self, norm: str) -> Optional[Dict[str, int]]:
+        markers = [
+            "ky nay",
+            "hoc ky nay",
+            "hoc ky hien tai",
+            "hk hien tai",
+            "dang mo dang ky",
+            "ky dang mo",
+        ]
+        if not any(marker in norm for marker in markers):
+            return None
+        row = self.conn.execute(
+            """
+            SELECT NamHoc, HocKy
+            FROM HocKyHeThong
+            WHERE DangMoDangKy = 1
+            ORDER BY NamHoc DESC, HocKy DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            today = date.today().isoformat()
+            row = self.conn.execute(
+                """
+                SELECT NamHoc, HocKy
+                FROM HocKyHeThong
+                WHERE NgayBatDau <= :today
+                  AND NgayKetThuc >= :today
+                ORDER BY NamHoc DESC, HocKy DESC
+                LIMIT 1
+                """,
+                {"today": today},
+            ).fetchone()
+        return {"NamHoc": int(row["NamHoc"]), "HocKy": int(row["HocKy"])} if row else None
+
     @staticmethod
     def _is_current_term_reference(norm: str) -> bool:
         return any(marker in norm for marker in ["ky nay", "ki nay", "hoc ky nay", "hoc ki nay", "ky hien tai", "ki hien tai"])
@@ -891,6 +937,7 @@ class VietnameseNL2SQLEngine:
             "gi",
             "nao",
             "co",
+            "khong",
             "cac",
             "nhung",
             "tat ca",
@@ -1130,6 +1177,8 @@ class VietnameseNL2SQLEngine:
             and ("MaSV" in slots or "MaLHP" in slots or "sinh vien" in norm)
         ):
             return "REGISTRATION_ELIGIBILITY_CHECK"
+        if "da dang ky" in norm or ("MaSV" in slots and "lich" in norm):
+            return "STUDENT_REGISTRATION_LOOKUP"
         if any(
             x in norm
             for x in [
@@ -1180,6 +1229,21 @@ class VietnameseNL2SQLEngine:
             for x in ["thong tin", "chuong trinh", "ctdt", "nganh nao", "khoa nao", "trang thai"]
         ):
             return "STUDENT_INFO_LOOKUP"
+        if "MaSV" in slots and any(
+            x in norm
+            for x in [
+                "ho so hoc tap",
+                "canh bao hoc vu",
+                "canh bao",
+                "tien do",
+                "gpa",
+                "diem trung binh",
+                "tin chi tich luy",
+                "nhom ho so",
+                "no mon",
+            ]
+        ):
+            return "ACADEMIC_PROFILE_LOOKUP"
         if any(x in norm for x in ["tong tin chi", "bao nhieu tin chi da dang ky", "dang ky bao nhieu tin chi"]):
             return "CREDIT_SUMMARY"
         if any(
@@ -1248,6 +1312,8 @@ class VietnameseNL2SQLEngine:
             df, sql, params, message = self._execute_recommendation(slots)
         elif intent == "STUDENT_INFO_LOOKUP":
             df, sql, params, message = self._execute_student_info(slots)
+        elif intent == "ACADEMIC_PROFILE_LOOKUP":
+            df, sql, params, message = self._execute_academic_profile(slots)
         elif intent == "PREREQUISITE_LOOKUP":
             df, sql, params, message = self._execute_prerequisite(slots)
         elif intent == "STUDENT_REGISTRATION_LOOKUP":
@@ -1392,6 +1458,30 @@ class VietnameseNL2SQLEngine:
         df = self._execute_sql(sql, params, slots.get("Limit", 50))
         return df, sql, params, self._summary_message(df, "sinh viên")
 
+    def _execute_academic_profile(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, str, Dict[str, Any], str]:
+        conditions = []
+        params: Dict[str, Any] = {}
+        if "MaSV" in slots:
+            conditions.append("td.MaSV = :ma_sv")
+            params["ma_sv"] = slots["MaSV"]
+        if "MaNganh" in slots:
+            conditions.append("sv.MaNganh = :ma_nganh")
+            params["ma_nganh"] = slots["MaNganh"]
+        sql = (
+            "SELECT td.MaSV, td.HoTen, sv.TrangThaiSV, td.NhomHoSo, hs.GPA, "
+            "td.TinChiTichLuy, td.TongTinChiToiThieu, td.PhanTramTinChiHoanThanh, "
+            "td.SoMonDaDau, td.SoMonChuaDat, hs.SoMonTungRot, "
+            "hs.SoLanHocLaiCaiThien, hs.TinChiDangKyHienTai, hs.GioiHanTinChi, "
+            "hs.CanhBaoHocVu, hs.GhiChu\n"
+            "FROM v_tien_do_ctdt_sv td\n"
+            "JOIN HoSoHocTapSinhVien hs ON hs.MaSV = td.MaSV\n"
+            "JOIN v_sinh_vien_day_du sv ON sv.MaSV = td.MaSV\n"
+            f"{self._where_clause(conditions)}\n"
+            "ORDER BY td.MaSV"
+        )
+        df = self._execute_sql(sql, params, slots.get("Limit", 50))
+        return df, sql, params, self._summary_message(df, "hồ sơ học tập")
+
     def _execute_curriculum(self, slots: Dict[str, Any]) -> Tuple[pd.DataFrame, str, Dict[str, Any], str]:
         conditions = []
         params: Dict[str, Any] = {}
@@ -1492,10 +1582,16 @@ class VietnameseNL2SQLEngine:
             params["buoi"] = f"%{slots['Buoi']}%"
         sql = (
             "SELECT MaSV, HoTen, MaLHP, TenMH, Nhom, SoTC, NamHoc, HocKy, "
-            "LichHocText, TenGV, TGDK\n"
-            "FROM v_dang_ky_day_du\n"
+            "TrangThaiLHP, LichHocText, BuoiText, ThuText, TenGV, TGDK, LoaiDangKy\n"
+            "FROM (\n"
+            "    SELECT dk.MaSV, dk.HoTen, dk.MaLHP, dk.MaMH, dk.TenMH, dk.Nhom, "
+            "dk.SoTC, dk.NamHoc, dk.HocKy, dk.TrangThaiLHP, dk.TGDK, dk.LoaiDangKy, "
+            "lhp.LichHocText, lhp.BuoiText, lhp.ThuText, lhp.TenGV\n"
+            "    FROM v_dang_ky_hien_tai_sv dk\n"
+            "    LEFT JOIN v_lop_hoc_phan_day_du lhp ON lhp.MaLHP = dk.MaLHP\n"
+            ")\n"
             f"{self._where_clause(conditions)}\n"
-            f"{self._order_clause(slots, 'v_dang_ky_day_du')}"
+            f"{self._order_clause(slots, 'v_dang_ky_hien_tai_sv')}"
         )
         df = self._execute_sql(sql, params, slots.get("Limit", 100))
         return df, sql, params, self._summary_message(df, "lớp đã đăng ký")
@@ -1918,17 +2014,19 @@ class VietnameseNL2SQLEngine:
                 "MaLHP",
             },
             "v_dang_ky_day_du": {"TGDK", "TenMH", "SoTC", "HocKy", "MaLHP"},
+            "v_dang_ky_hien_tai_sv": {"TGDK", "TenMH", "SoTC", "HocKy", "MaLHP"},
             "v_ket_qua_day_du": {"TenMH", "SoTC", "HocKy", "NamHoc"},
             "v_ket_qua_tot_nhat_sv": {"TenMH", "SoTC", "HocKy", "NamHoc", "DiemTongKet", "DiemHe4"},
+            "v_ket_qua_hoc_tap_sv": {"TenMH", "SoTC", "HocKy", "NamHoc"},
             "v_tin_chi_dang_ky_sv": {"TongTinChiDangKy", "SoLopDaDangKy", "HocKy", "MaSV"},
         }
         if requested in allowed.get(view, set()):
             return f"ORDER BY {requested} {direction}"
         if view == "v_lop_hoc_phan_lich":
             return "ORDER BY Thu, TietBD, TenMH, Nhom"
-        if view == "v_dang_ky_day_du":
+        if view in {"v_dang_ky_day_du", "v_dang_ky_hien_tai_sv"}:
             return "ORDER BY HocKy, TenMH, Nhom"
-        if view in {"v_ket_qua_day_du", "v_ket_qua_tot_nhat_sv"}:
+        if view in {"v_ket_qua_day_du", "v_ket_qua_tot_nhat_sv", "v_ket_qua_hoc_tap_sv"}:
             return "ORDER BY NamHoc, HocKy, TenMH"
         if view == "v_tin_chi_dang_ky_sv":
             return "ORDER BY NamHoc, HocKy, MaSV"
@@ -1955,7 +2053,9 @@ COURSE_ALIASES: Dict[str, List[str]] = {
     "DBSY230184E": ["co so du lieu", "csdl", "database systems", "database", "dbsy"],
     "COAR230280E": ["kien truc may tinh", "computer architecture", "coar"],
     "OSYS330281E": ["he dieu hanh", "operating systems", "os", "osys"],
-    "NECO330282E": ["mang may tinh", "computer networks", "network", "neco"],
+    "NEES330380E": ["mang may tinh", "nhap mon mang may tinh", "networking essentials", "computer networks", "network"],
+    "CNDE430780E": ["thiet ke mang", "network design", "network design 2 1", "cnde"],
+    "NECO330282E": ["neco"],
     "DBMS330284E": ["quan tri co so du lieu", "dbms", "database management systems", "quan tri csdl"],
     "WEPR330383E": ["lap trinh web", "web programming", "web", "wepr"],
     "SOEN330384E": ["cong nghe phan mem", "software engineering", "se", "soen"],
