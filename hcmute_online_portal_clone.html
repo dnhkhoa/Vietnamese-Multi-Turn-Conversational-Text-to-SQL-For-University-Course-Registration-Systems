@@ -1,0 +1,1382 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HCMUTE Online Student Portal Clone</title>
+  <style>
+    :root {
+      --portal-blue: #005f91;
+      --portal-blue-dark: #004e7b;
+      --portal-blue-header: #075f91;
+      --portal-table-header: #06467a;
+      --portal-yellow: #fff200;
+      --portal-orange: #f2a000;
+      --portal-red: #e51b3e;
+      --page-background: #eeeeee;
+      --panel-background: #ffffff;
+      --group-row-blue: #8dc9e8;
+      --group-row-pink: #f5cccc;
+      --summary-row-yellow: #f3d18e;
+      --failed-row: #e79a9e;
+      --border-light: #d5d5d5;
+      --border-table: #bcc8d2;
+      --text-primary: #17314d;
+      --text-secondary: #6a7785;
+      --text-link: #005f91;
+      --text-white: #ffffff;
+      --success: #139219;
+      --danger: #e22038;
+      --font-family: Arial, Helvetica, sans-serif;
+      --sidebar-width: 240px;
+      --header-height: 55px;
+      --radius-input: 2px;
+      --radius-panel: 3px;
+      --shadow-panel: 0 1px 2px rgb(0 0 0 / 10%);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 13px;
+      background: var(--page-background);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font-family: var(--font-family);
+      font-size: 12px;
+    }
+
+    button { cursor: pointer; }
+
+    .hidden { display: none !important; }
+
+    .login-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 56px;
+      background: #f2f2f2;
+    }
+
+    .login-brand {
+      width: 430px;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+
+    .brand-logo {
+      width: 88px;
+      height: 88px;
+      margin: 0 auto 6px;
+      border: 4px solid #005f91;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #005f91;
+      background: #fff;
+      font-weight: 700;
+      line-height: 1.05;
+      letter-spacing: 0;
+      box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 7px #e51b3e;
+    }
+
+    .brand-logo small {
+      display: block;
+      color: #e51b3e;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .login-brand h1 {
+      margin: 0;
+      color: var(--portal-blue);
+      font-size: 24px;
+      line-height: 1.1;
+      font-weight: 700;
+    }
+
+    .login-brand p {
+      margin: 6px 0 0;
+      color: var(--portal-blue-dark);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .login-card {
+      width: 430px;
+      background: #fff;
+      border: 1px solid #cfcfcf;
+      border-radius: 3px;
+      box-shadow: var(--shadow-panel);
+      padding: 18px 24px 16px;
+    }
+
+    .login-card h2 {
+      margin: 2px 0 3px;
+      color: var(--portal-blue);
+      font-size: 19px;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .login-card .subtitle {
+      margin: 0 0 16px;
+      color: #6b6b6b;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .field { margin-bottom: 10px; }
+
+    .field label {
+      display: block;
+      margin-bottom: 4px;
+      color: #303030;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .field input,
+    .field select,
+    .search-input input,
+    .agent-composer textarea {
+      width: 100%;
+      min-height: 31px;
+      padding: 5px 8px;
+      border: 1px solid #b8c0c8;
+      border-radius: var(--radius-input);
+      background: #fff;
+      color: #222;
+      outline: none;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .search-input input:focus,
+    .agent-composer textarea:focus {
+      border-color: var(--portal-blue);
+      box-shadow: 0 0 0 1px rgb(0 95 145 / 20%);
+    }
+
+    .portal-button {
+      min-height: 31px;
+      padding: 6px 12px;
+      border: 1px solid #004e7b;
+      border-radius: var(--radius-input);
+      background: var(--portal-blue);
+      color: #fff;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .portal-button.secondary {
+      background: #fff;
+      color: var(--portal-blue);
+      border-color: #7aa8c7;
+      font-weight: 700;
+    }
+
+    .login-card .portal-button {
+      width: 100%;
+      margin-top: 2px;
+    }
+
+    .google-button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 31px;
+      margin-top: 8px;
+      border: 1px solid #7aa8c7;
+      border-radius: 2px;
+      background: #fff;
+      color: var(--portal-blue);
+      font-weight: 700;
+    }
+
+    .google-mark {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: inline-grid;
+      place-items: center;
+      color: #4285f4;
+      font-size: 13px;
+      font-weight: 700;
+      border: 1px solid #d9d9d9;
+    }
+
+    .forgot {
+      display: block;
+      margin-top: 9px;
+      text-align: center;
+      color: var(--text-link);
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .login-error {
+      display: none;
+      margin: 0 0 10px;
+      padding: 7px 8px;
+      color: #9f1626;
+      background: #ffe7ea;
+      border: 1px solid #efb6bd;
+      font-size: 12px;
+    }
+
+    .login-footer {
+      margin-top: 18px;
+      color: #777;
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .portal-shell {
+      min-height: 100vh;
+      background: var(--page-background);
+    }
+
+    .sidebar {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--sidebar-width);
+      background: var(--portal-blue-dark);
+      color: #fff;
+      overflow-y: auto;
+      z-index: 30;
+    }
+
+    .sidebar-logo {
+      height: 138px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-bottom: 1px solid rgb(255 255 255 / 18%);
+      text-decoration: none;
+      color: #fff;
+    }
+
+    .sidebar-logo .brand-logo {
+      width: 66px;
+      height: 66px;
+      margin-bottom: 8px;
+      border-width: 3px;
+      font-size: 15px;
+    }
+
+    .sidebar-logo span {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .student-summary {
+      padding: 13px 14px 14px;
+      text-align: center;
+      border-bottom: 1px solid rgb(255 255 255 / 18%);
+    }
+
+    .avatar {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 7px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      background:
+        radial-gradient(circle at 50% 34%, #e7edf3 0 13px, transparent 14px),
+        radial-gradient(circle at 50% 90%, #d2dde7 0 31px, transparent 32px),
+        #b8cadb;
+    }
+
+    .student-summary .name {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .student-summary .meta {
+      margin-top: 3px;
+      font-size: 11px;
+      color: #e4edf4;
+      line-height: 1.45;
+    }
+
+    .nav-group { padding: 8px 0 4px; }
+
+    .nav-heading {
+      padding: 6px 16px 5px;
+      color: var(--portal-yellow);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .nav-link {
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-height: 31px;
+      padding: 7px 14px 7px 22px;
+      color: #fff;
+      font-size: 12px;
+      text-decoration: none;
+      border-top: 1px solid rgb(255 255 255 / 5%);
+    }
+
+    .nav-link .icon {
+      width: 18px;
+      margin-right: 7px;
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .nav-link.active {
+      color: var(--portal-orange);
+      font-weight: 700;
+    }
+
+    .nav-link.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: var(--portal-orange);
+    }
+
+    .student-header {
+      position: fixed;
+      left: var(--sidebar-width);
+      right: 0;
+      top: 0;
+      height: var(--header-height);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px 0 34px;
+      background: var(--portal-blue-header);
+      color: #fff;
+      z-index: 20;
+      border-bottom: 1px solid rgb(0 0 0 / 15%);
+    }
+
+    .student-header h1 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      font-size: 16px;
+    }
+
+    .flag {
+      width: 26px;
+      height: 17px;
+      display: inline-grid;
+      place-items: center;
+      background: #da251d;
+      color: #ff0;
+      font-size: 11px;
+      border: 1px solid rgb(255 255 255 / 40%);
+    }
+
+    .header-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid #fff;
+      background:
+        radial-gradient(circle at 50% 36%, #f0f5f8 0 6px, transparent 7px),
+        radial-gradient(circle at 50% 95%, #cedbe5 0 14px, transparent 15px),
+        #9ab6c9;
+    }
+
+    .main-content {
+      margin-left: var(--sidebar-width);
+      padding: calc(var(--header-height) + 18px) 20px 28px;
+      min-height: 100vh;
+    }
+
+    .ribbon {
+      display: flex;
+      align-items: center;
+      height: 36px;
+      margin-bottom: 12px;
+    }
+
+    .ribbon-title {
+      position: relative;
+      min-width: 220px;
+      height: 32px;
+      padding: 6px 28px 5px 14px;
+      background: var(--portal-blue);
+      color: #fff;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 21px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .ribbon-title::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: -27px;
+      width: 0;
+      height: 0;
+      border-top: 16px solid transparent;
+      border-bottom: 16px solid transparent;
+      border-left: 27px solid #bfc5ca;
+    }
+
+    .ribbon-line {
+      flex: 1;
+      height: 1px;
+      margin-left: 32px;
+      background: #bfc5ca;
+    }
+
+    .panel {
+      background: var(--panel-background);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+      margin-bottom: 12px;
+    }
+
+    .panel-header {
+      min-height: 31px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-light);
+      color: var(--portal-blue-dark);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 13px;
+      background: #fafafa;
+    }
+
+    .panel-body { padding: 10px; }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid #d9d9d9;
+      margin-bottom: 10px;
+    }
+
+    .tab {
+      padding: 8px 15px 7px;
+      border: 0;
+      background: transparent;
+      color: #666;
+      font-weight: 700;
+      font-size: 12px;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab.active {
+      color: var(--portal-blue);
+      border-bottom-color: var(--portal-red);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar label {
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .toolbar select {
+      min-width: 190px;
+      height: 30px;
+      border: 1px solid #b8c0c8;
+      border-radius: 2px;
+      background: #fff;
+      color: #222;
+    }
+
+    .search-input {
+      position: relative;
+      width: 280px;
+      max-width: 100%;
+    }
+
+    .search-input input {
+      padding-left: 26px;
+      font-style: italic;
+    }
+
+    .search-input::before {
+      content: "⌕";
+      position: absolute;
+      left: 8px;
+      top: 6px;
+      z-index: 1;
+      color: #777;
+      font-size: 14px;
+    }
+
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--border-table);
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    th {
+      padding: 6px 7px;
+      background: var(--portal-table-header);
+      color: #fff;
+      border: 1px solid #0a3d69;
+      font-weight: 700;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 5px 7px;
+      border: 1px solid var(--border-table);
+      vertical-align: middle;
+      background: #fff;
+    }
+
+    tbody tr:nth-child(even) td { background: #f8f8f8; }
+
+    .num,
+    .center { text-align: center; }
+
+    .right { text-align: right; }
+
+    .link {
+      color: var(--text-link);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .group-pink td {
+      background: var(--group-row-pink) !important;
+      color: #21354d;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    .group-blue td {
+      background: var(--group-row-blue) !important;
+      color: #17314d;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    .summary-row td {
+      background: var(--summary-row-yellow) !important;
+      font-weight: 700;
+    }
+
+    .failed-row td {
+      background: var(--failed-row) !important;
+    }
+
+    .status-pass { color: var(--success); font-weight: 700; }
+    .status-fail { color: var(--danger); font-weight: 700; }
+
+    .student-grid {
+      display: grid;
+      grid-template-columns: 250px 1fr 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .info-panel .row {
+      display: grid;
+      grid-template-columns: 145px 1fr;
+      min-height: 27px;
+      border-bottom: 1px solid #e1e1e1;
+    }
+
+    .info-panel .row:last-child { border-bottom: 0; }
+
+    .info-panel .label {
+      padding: 6px 8px;
+      color: #52606d;
+      font-weight: 700;
+      background: #f7f7f7;
+      border-right: 1px solid #e1e1e1;
+    }
+
+    .info-panel .value { padding: 6px 8px; }
+
+    .avatar-panel {
+      text-align: center;
+      padding: 14px 10px 12px;
+    }
+
+    .avatar-panel .avatar {
+      width: 112px;
+      height: 112px;
+      margin-bottom: 9px;
+      border-color: #d3dce4;
+    }
+
+    .avatar-panel .student-name {
+      font-weight: 700;
+      color: var(--portal-blue-dark);
+      margin-bottom: 4px;
+    }
+
+    .chart-box {
+      min-height: 152px;
+      padding: 10px;
+    }
+
+    .bar {
+      height: 14px;
+      background: #e7e7e7;
+      border: 1px solid #d1d1d1;
+      margin: 7px 0 11px;
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      background: var(--portal-blue);
+    }
+
+    .mini-chart {
+      height: 92px;
+      display: flex;
+      align-items: end;
+      gap: 9px;
+      padding: 7px 5px 2px;
+      border-left: 1px solid #d1d1d1;
+      border-bottom: 1px solid #d1d1d1;
+    }
+
+    .mini-chart span {
+      width: 22px;
+      background: #64a9cf;
+      border: 1px solid #4086ad;
+    }
+
+    .course-note,
+    .agent-hint {
+      margin: 0 0 8px;
+      color: #4e5d68;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .floating-agent {
+      position: fixed;
+      right: 24px;
+      bottom: 20px;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      border: 1px solid #004e7b;
+      background: var(--portal-blue);
+      color: #fff;
+      z-index: 50;
+      box-shadow: 0 2px 6px rgb(0 0 0 / 25%);
+      font-size: 20px;
+    }
+
+    .agent-panel {
+      position: fixed;
+      right: 24px;
+      bottom: 76px;
+      width: 390px;
+      max-width: calc(100vw - 48px);
+      max-height: 70vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid #b7c3cc;
+      border-radius: 3px;
+      box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+      z-index: 60;
+    }
+
+    .agent-header {
+      min-height: 35px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 9px;
+      background: var(--portal-blue);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .agent-header button {
+      border: 0;
+      background: transparent;
+      color: #fff;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .agent-messages {
+      min-height: 190px;
+      overflow-y: auto;
+      padding: 9px;
+      border-bottom: 1px solid #d7d7d7;
+    }
+
+    .message {
+      margin-bottom: 7px;
+      padding: 7px 8px;
+      border: 1px solid #d6dde3;
+      border-radius: 3px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .message.assistant { background: #f5f6f7; }
+    .message.user { background: #e9f4fb; }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      padding: 8px 9px 4px;
+    }
+
+    .suggestions button {
+      border: 1px solid #b8c8d4;
+      border-radius: 2px;
+      background: #fff;
+      color: var(--portal-blue);
+      padding: 4px 6px;
+      font-size: 11px;
+      text-align: left;
+    }
+
+    .agent-composer {
+      display: grid;
+      grid-template-columns: 1fr 64px;
+      gap: 7px;
+      padding: 7px 9px 9px;
+    }
+
+    .agent-composer textarea {
+      resize: none;
+      min-height: 34px;
+      max-height: 80px;
+      line-height: 1.35;
+    }
+
+    .agent-composer button {
+      border: 1px solid #004e7b;
+      background: var(--portal-blue);
+      color: #fff;
+      border-radius: 2px;
+      font-weight: 700;
+    }
+
+    .drawer-toggle { display: none; }
+
+    @media (max-width: 900px) {
+      :root { --sidebar-width: 220px; }
+      .student-grid { grid-template-columns: 1fr; }
+      .student-header h1 { font-size: 16px; }
+    }
+
+    @media (max-width: 720px) {
+      .drawer-toggle {
+        display: inline-block;
+        border: 1px solid rgb(255 255 255 / 50%);
+        background: transparent;
+        color: #fff;
+        margin-right: 8px;
+      }
+      .sidebar {
+        transform: translateX(-100%);
+        transition: transform .15s linear;
+      }
+      .sidebar.open { transform: translateX(0); }
+      .student-header {
+        left: 0;
+        padding-left: 10px;
+      }
+      .main-content {
+        margin-left: 0;
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+      .login-brand,
+      .login-card { width: calc(100vw - 28px); }
+      .ribbon-title {
+        min-width: 180px;
+        font-size: 17px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script>
+    const student = {
+      id: "22110001",
+      name: "Hoàng Minh Mai",
+      type: "SV/HV/NCS",
+      status: "Còn học",
+      major: "Công nghệ thông tin",
+      className: "CNTT K22",
+      program: "Chương trình đào tạo HCMUTE - Công nghệ thông tin",
+      course: "CNTT K22",
+      birthDate: "14/09/2004",
+      birthPlace: "TP. Hồ Chí Minh",
+      gender: "Nữ",
+      citizenId: "0772******01",
+      ethnicity: "Kinh",
+      religion: "Không",
+      phone: "09******01",
+      email: "22110001@student.hcmute.edu.vn",
+      address: "TP. Hồ Chí Minh",
+      gpa: "2.63",
+      credits: 170,
+      requiredCredits: 150,
+      currentCredits: 13
+    };
+
+    const notifications = [
+      { title: "Thông báo lịch đăng ký học phần học kỳ 2 năm 2026", sender: "Phòng Đào tạo", time: "20/06/2026 08:00" },
+      { title: "Hướng dẫn tra cứu chương trình đào tạo và kết quả học tập", sender: "Phòng CTSV", time: "18/06/2026 15:35" },
+      { title: "Cập nhật dữ liệu lớp học phần trên cổng thông tin", sender: "Trung tâm dữ liệu", time: "15/06/2026 09:20" },
+      { title: "Nhắc sinh viên kiểm tra thông tin cá nhân", sender: "Phòng Đào tạo", time: "10/06/2026 10:10" }
+    ];
+
+    const curriculumRows = [
+      { code: "ADNT330580E", name: "Advanced Networking Technology", credits: 3, type: "Bắt buộc", term: 1, prereq: "Data communications; Networking Essentials" },
+      { code: "AMHC333179E", name: "Agile methods (2+1)", credits: 3, type: "Bắt buộc", term: 1, prereq: "Software Engineering" },
+      { code: "BCAP433280", name: "Blockchain và ứng dụng", credits: 3, type: "Bắt buộc", term: 1, prereq: "Data Structures and Algorithms" },
+      { code: "BDES333877E", name: "Big Data Essentials", credits: 3, type: "Bắt buộc", term: 1, prereq: "Database management system" },
+      { code: "ADDB331784E", name: "Advanced Database", credits: 3, type: "Tự chọn", term: "", prereq: "Database management system" },
+      { code: "AIOT331185E", name: "Artificial Intelligence for IoT", credits: 3, type: "Tự chọn", term: "", prereq: "Artificial Intelligence; Internet of Things" },
+      { code: "DAWH430784E", name: "Data Warehouse", credits: 3, type: "Tự chọn", term: "", prereq: "Database management system" },
+      { code: "INRE431084E", name: "Information Retrieval", credits: 3, type: "Tự chọn", term: "", prereq: "Data Structures and Algorithms; Database System" }
+    ];
+
+    const marks = [
+      { year: "2022", sem: "1", code: "ACEN340535E", name: "Academic English 1", credits: 4, score10: 7.3, score4: 3.0, letter: "B", result: "Đạt", note: "" },
+      { year: "2022", sem: "1", code: "MATH132401E", name: "Calculus I", credits: 3, score10: 6.5, score4: 2.5, letter: "C+", result: "Đạt", note: "" },
+      { year: "2022", sem: "1", code: "INPR130285E", name: "Introduction to Programming", credits: 3, score10: 8.3, score4: 3.5, letter: "B+", result: "Đạt", note: "" },
+      { year: "2023", sem: "1", code: "DBSY230184E", name: "Database System", credits: 3, score10: 4.7, score4: 0, letter: "F", result: "Không đạt", note: "Lần học 1" },
+      { year: "2023", sem: "2", code: "DBSY230184E", name: "Database System", credits: 3, score10: 6.0, score4: 2.0, letter: "C", result: "Đạt", note: "Học lại" },
+      { year: "2026", sem: "2", code: "ETHA332080E", name: "Ethical Hacking (2+1)", credits: 3, score10: "", score4: "", letter: "", result: "Đang học", note: "" }
+    ];
+
+    const offerings = [
+      { id: "LHP202620020", code: "ACEN440735E", name: "Academic English 3", group: "01", credits: 4, status: "Đầy", schedule: "Thứ 7 tiết 7-10 phòng A3-202", teacher: "Nguyễn Thanh Đạt" },
+      { id: "LHP202620024", code: "GDQP008031E", name: "Military Education 1 (*)", group: "01", credits: 1, status: "Đóng", schedule: "Thứ 7 tiết 8-10 phòng A4-404", teacher: "Nguyễn Minh Khang" },
+      { id: "LHP202620179", code: "CNDE430780E", name: "Network Design (2+1)", group: "03", credits: 3, status: "Mở", schedule: "Thứ 5 tiết 1-5; Thứ 7 tiết 1-3", teacher: "Trần Minh Quyên" },
+      { id: "LHP202620207", code: "ETHA332080E", name: "Ethical Hacking (2+1)", group: "01", credits: 3, status: "Mở", schedule: "Thứ 3 tiết 7-10; Thứ 5 tiết 1-4", teacher: "Nguyễn Hữu Nam" }
+    ];
+
+    const routes = {
+      "/student": { title: "THÔNG BÁO", render: renderNotifications },
+      "/student/info": { title: "THÔNG TIN SINH VIÊN", render: renderStudentInfo },
+      "/student/studyprograms": { title: "CHƯƠNG TRÌNH ĐÀO TẠO", render: renderStudyProgram },
+      "/student/marks": { title: "KẾT QUẢ HỌC TẬP", render: renderMarks },
+      "/student/RegistScheduleUnit": { title: "ĐĂNG KÝ HỌC PHẦN", render: renderRegistration }
+    };
+
+    function route() {
+      return location.hash.replace("#", "") || (sessionStorage.portalLoggedIn ? "/student" : "/login");
+    }
+
+    function navigate(path) {
+      location.hash = path;
+    }
+
+    function isLoggedIn() {
+      return sessionStorage.portalLoggedIn === "1";
+    }
+
+    function render() {
+      const current = route();
+      if (current === "/login" || !isLoggedIn()) {
+        renderLogin();
+        return;
+      }
+      renderShell(current);
+    }
+
+    function renderLogin() {
+      document.getElementById("app").innerHTML = `
+        <main class="login-page">
+          <section class="login-brand" aria-label="HCMUTE">
+            <div class="brand-logo">HCM<br><small>UTE</small></div>
+            <h1>HCM-UTE</h1>
+            <p>Trường Đại học Công nghệ Kỹ thuật TP.HCM</p>
+          </section>
+          <form class="login-card" id="loginForm">
+            <h2>Đăng nhập</h2>
+            <p class="subtitle">Cổng thông tin đào tạo</p>
+            <div class="login-error" id="loginError">Tài khoản demo: 22110001 / demo123</div>
+            <div class="field">
+              <label for="username">Tên đăng nhập</label>
+              <input id="username" autocomplete="username" value="22110001">
+            </div>
+            <div class="field">
+              <label for="password">Mật khẩu</label>
+              <input id="password" type="password" autocomplete="current-password" value="demo123">
+            </div>
+            <button class="portal-button" type="submit">Đăng nhập</button>
+            <button class="google-button" type="button"><span class="google-mark">G</span>Đăng nhập với Google Sinh viên</button>
+            <button class="google-button" type="button"><span class="google-mark">G</span>Đăng nhập với Google Giảng viên</button>
+            <a class="forgot" href="#">Quên mật khẩu</a>
+          </form>
+          <footer class="login-footer">All Rights Reserved Developed by PSC</footer>
+        </main>
+      `;
+      document.getElementById("loginForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const username = document.getElementById("username").value.trim();
+        const password = document.getElementById("password").value;
+        if (username === student.id && password === "demo123") {
+          sessionStorage.portalLoggedIn = "1";
+          navigate("/student");
+          return;
+        }
+        document.getElementById("loginError").style.display = "block";
+      });
+    }
+
+    function renderShell(current) {
+      const page = routes[current] || routes["/student"];
+      document.getElementById("app").innerHTML = `
+        <div class="portal-shell">
+          ${renderSidebar(current)}
+          <header class="student-header">
+            <div>
+              <button class="drawer-toggle" id="drawerToggle" aria-label="Mở menu">☰</button>
+              <h1 style="display:inline-block">TRƯỜNG ĐẠI HỌC CÔNG NGHỆ KỸ THUẬT TP.HCM</h1>
+            </div>
+            <div class="header-actions">
+              <span class="flag" aria-label="Việt Nam">★</span>
+              <span aria-label="Thông báo">🔔</span>
+              <button class="header-avatar" id="logoutButton" title="Đăng xuất" aria-label="Đăng xuất"></button>
+            </div>
+          </header>
+          <main class="main-content">
+            ${renderRibbon(page.title)}
+            <section id="pageContent">${page.render()}</section>
+          </main>
+          ${renderAgent()}
+        </div>
+      `;
+      bindShellEvents();
+      bindPageEvents(current);
+      bindAgentEvents();
+    }
+
+    function renderSidebar(current) {
+      const item = (path, icon, label) => `
+        <a class="nav-link ${current === path ? "active" : ""}" href="#${path}" ${current === path ? 'aria-current="page"' : ""}>
+          <span class="icon">${icon}</span><span>${label}</span>
+        </a>`;
+      return `
+        <aside class="sidebar" id="sidebar">
+          <a class="sidebar-logo" href="#/student" aria-label="Trang chủ sinh viên">
+            <div class="brand-logo">HCM<br><small>UTE</small></div>
+            <span>HCM-UTE</span>
+          </a>
+          <div class="student-summary">
+            <div class="avatar" role="img" aria-label="Ảnh sinh viên"></div>
+            <div class="name">${student.name}</div>
+            <div class="meta">${student.type} - ${student.id}<br>(${student.status})</div>
+          </div>
+          <nav>
+            <div class="nav-group">
+              <div class="nav-heading">Trang cá nhân</div>
+              ${item("/student/info", "▣", "Thông tin cá nhân")}
+            </div>
+            <div class="nav-group">
+              <div class="nav-heading">Tra cứu thông tin</div>
+              ${item("/student/studyprograms", "▦", "Chương trình đào tạo")}
+              ${item("/student/marks", "▤", "Xem điểm")}
+            </div>
+            <div class="nav-group">
+              <div class="nav-heading">Chức năng trực tuyến</div>
+              ${item("/student/RegistScheduleUnit", "▥", "Đăng ký học phần")}
+            </div>
+          </nav>
+        </aside>`;
+    }
+
+    function renderRibbon(title) {
+      return `<div class="ribbon"><div class="ribbon-title">${title}</div><div class="ribbon-line"></div></div>`;
+    }
+
+    function renderNotifications() {
+      return `
+        <section class="panel">
+          <div class="panel-body">
+            <div class="tabs">
+              <button class="tab active" data-tab="general">THÔNG BÁO CHUNG</button>
+              <button class="tab" data-tab="personal">THÔNG BÁO CÁ NHÂN</button>
+            </div>
+            <div class="toolbar">
+              <div class="search-input"><input id="notificationSearch" placeholder="Tìm kiếm thông báo"></div>
+            </div>
+            <div class="table-wrap">
+              <table aria-label="Danh sách thông báo">
+                <thead><tr><th>Tiêu đề</th><th>Người gửi</th><th>Thời gian gửi</th></tr></thead>
+                <tbody id="notificationRows">${notificationRows(notifications)}</tbody>
+              </table>
+            </div>
+          </div>
+        </section>`;
+    }
+
+    function notificationRows(rows) {
+      if (!rows.length) {
+        return `<tr><td colspan="3" class="center">Không tìm thấy thông báo.</td></tr>`;
+      }
+      return rows.map(row => `
+        <tr>
+          <td><a class="link" href="#">${row.title}</a></td>
+          <td>${row.sender}</td>
+          <td class="center">${row.time}</td>
+        </tr>`).join("");
+    }
+
+    function renderStudentInfo() {
+      return `
+        <div class="toolbar">
+          <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
+          <label>Năm học</label><select><option>2026</option><option>2025</option></select>
+          <label>Học kỳ</label><select><option>Học kỳ 2</option><option>Học kỳ 1</option></select>
+        </div>
+        <section class="student-grid">
+          <div class="panel avatar-panel">
+            <div class="avatar"></div>
+            <div class="student-name">${student.name}</div>
+            <div>${student.type} - ${student.id}</div>
+            <button class="portal-button secondary" style="margin-top:10px">Cập nhật thông tin cá nhân</button>
+          </div>
+          <div class="panel chart-box">
+            <div class="panel-header">Kết quả học tập</div>
+            <p>Điểm trung bình tích lũy: <strong>${student.gpa}</strong></p>
+            <div class="mini-chart" aria-label="Biểu đồ kết quả học tập">
+              <span style="height:58%"></span><span style="height:64%"></span><span style="height:72%"></span><span style="height:61%"></span><span style="height:69%"></span>
+            </div>
+          </div>
+          <div class="panel chart-box">
+            <div class="panel-header">Tiến độ học tập</div>
+            <p>Tín chỉ tích lũy: <strong>${student.credits}/${student.requiredCredits}</strong></p>
+            <div class="bar"><span style="width:100%"></span></div>
+            <p>Đăng ký hiện tại: <strong>${student.currentCredits}</strong> tín chỉ</p>
+          </div>
+          <div class="panel info-panel">
+            <div class="panel-header">Thông tin cơ bản</div>
+            ${infoRow("Mã sinh viên", student.id)}
+            ${infoRow("Họ tên", student.name)}
+            ${infoRow("Ngày sinh", student.birthDate)}
+            ${infoRow("Nơi sinh", student.birthPlace)}
+            ${infoRow("Giới tính", student.gender)}
+            ${infoRow("CMND/CCCD", student.citizenId)}
+            ${infoRow("Dân tộc", student.ethnicity)}
+            ${infoRow("Tôn giáo", student.religion)}
+            ${infoRow("Lớp sinh viên", student.className)}
+          </div>
+          <div class="panel info-panel">
+            <div class="panel-header">Thông tin liên hệ</div>
+            ${infoRow("Email", student.email)}
+            ${infoRow("Điện thoại", student.phone)}
+            ${infoRow("Địa chỉ", student.address)}
+            ${infoRow("Liên hệ khẩn cấp", "Nguyễn Văn A - 09******88")}
+          </div>
+          <div class="panel info-panel">
+            <div class="panel-header">Thông tin nhập học</div>
+            ${infoRow("Ngành", student.major)}
+            ${infoRow("Khóa học", student.course)}
+            ${infoRow("Trạng thái", student.status)}
+            ${infoRow("Chương trình", student.program)}
+          </div>
+        </section>`;
+    }
+
+    function infoRow(label, value) {
+      return `<div class="row"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function renderStudyProgram() {
+      return `
+        <div class="toolbar">
+          <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
+          <label>Học kỳ</label><select id="termFilter"><option value="">Tất cả</option><option value="1">1</option></select>
+        </div>
+        ${curriculumTable()}`;
+    }
+
+    function curriculumTable() {
+      const body = [
+        `<tr class="group-pink"><td colspan="8">Chưa phân học kỳ</td></tr>`,
+        `<tr class="group-blue"><td colspan="8">Bắt buộc</td></tr>`,
+        ...curriculumRows.filter(r => r.type === "Bắt buộc").map(courseRow),
+        `<tr class="group-blue"><td colspan="8">Tự chọn</td></tr>`,
+        ...curriculumRows.filter(r => r.type === "Tự chọn").map(courseRow)
+      ].join("");
+      return `
+        <div class="table-wrap">
+          <table aria-label="Chương trình đào tạo">
+            <thead>
+              <tr><th>STT</th><th>Mã học phần</th><th>Tên học phần</th><th>Nhóm</th><th>Số TC</th><th>Học kỳ</th><th>Học phần tiên quyết</th><th>Kết quả</th></tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function courseRow(row, index) {
+      return `
+        <tr data-term="${row.term}">
+          <td class="center">${index + 1}</td>
+          <td class="center">${row.code}</td>
+          <td>${row.name}</td>
+          <td class="center">${row.type}</td>
+          <td class="center">${row.credits}</td>
+          <td class="center">${row.term || "Chưa phân"}</td>
+          <td>${row.prereq || ""}</td>
+          <td class="center">${index < 3 ? '<span class="status-pass">✓ Đã đạt</span>' : ""}</td>
+        </tr>`;
+    }
+
+    function renderMarks() {
+      return `
+        <div class="toolbar">
+          <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
+          <label>Năm học</label><select id="markYear"><option value="">Tất cả</option><option>2022</option><option>2023</option><option>2026</option></select>
+          <label>Học kỳ</label><select id="markSem"><option value="">Tất cả</option><option>1</option><option>2</option></select>
+        </div>
+        <div class="table-wrap">
+          <table aria-label="Kết quả học tập">
+            <thead>
+              <tr><th>STT</th><th>Mã môn học</th><th>Tên môn học</th><th>Số TC</th><th>Điểm hệ 10</th><th>Điểm hệ 4</th><th>Điểm chữ</th><th>Kết quả</th><th>Ghi chú</th><th>Chi tiết</th></tr>
+            </thead>
+            <tbody id="marksRows">${marksRows(marks)}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function marksRows(rows) {
+      let html = "";
+      let currentGroup = "";
+      rows.forEach((row, index) => {
+        const group = `${row.year}-${row.sem}`;
+        if (group !== currentGroup) {
+          currentGroup = group;
+          html += `<tr class="group-pink"><td colspan="10">Năm học ${row.year}</td></tr>`;
+          html += `<tr class="group-blue"><td colspan="10">Học kỳ ${row.sem}</td></tr>`;
+        }
+        const failed = row.result === "Không đạt";
+        html += `
+          <tr class="${failed ? "failed-row" : ""}">
+            <td class="center">${index + 1}</td>
+            <td class="center">${row.code}</td>
+            <td>${row.name}</td>
+            <td class="center">${row.credits}</td>
+            <td class="center">${row.score10}</td>
+            <td class="center">${row.score4}</td>
+            <td class="center">${row.letter}</td>
+            <td class="center ${failed ? "status-fail" : "status-pass"}">${failed ? "✕" : "✓"} ${row.result}</td>
+            <td>${row.note}</td>
+            <td class="center">▾</td>
+          </tr>`;
+      });
+      html += `<tr class="summary-row"><td colspan="10">Tổng số tín chỉ tích lũy: ${student.credits} | Điểm TB tích lũy hệ 4: ${student.gpa}</td></tr>`;
+      return html;
+    }
+
+    function renderRegistration() {
+      return `
+        <p class="course-note">Trang này hiển thị chương trình đào tạo để hỗ trợ tra cứu và hỏi đáp đăng ký học phần qua trợ lý AI. Không thực hiện đăng ký học phần thật.</p>
+        <div class="toolbar">
+          <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
+        </div>
+        ${curriculumTable()}
+        <p class="agent-hint">Nhấn biểu tượng trợ lý ở góc dưới bên phải để hỏi về các học phần có thể đăng ký.</p>
+        <section class="panel">
+          <div class="panel-header">Lớp học phần học kỳ hiện tại</div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table aria-label="Lớp học phần">
+                <thead><tr><th>Mã LHP</th><th>Mã môn</th><th>Tên môn</th><th>Nhóm</th><th>TC</th><th>Trạng thái</th><th>Lịch học</th><th>Giảng viên</th></tr></thead>
+                <tbody>${offerings.map(row => `
+                  <tr><td class="center">${row.id}</td><td class="center">${row.code}</td><td>${row.name}</td><td class="center">${row.group}</td><td class="center">${row.credits}</td><td class="center">${row.status}</td><td>${row.schedule}</td><td>${row.teacher}</td></tr>
+                `).join("")}</tbody>
+              </table>
+            </div>
+          </div>
+        </section>`;
+    }
+
+    function renderAgent() {
+      const open = sessionStorage.agentOpen === "1";
+      return `
+        <section class="agent-panel ${open ? "" : "hidden"}" id="agentPanel" aria-label="Trợ lý đăng ký học phần">
+          <div class="agent-header"><span>🤖 Trợ lý đăng ký học phần</span><button id="agentClose" aria-label="Đóng trợ lý">×</button></div>
+          <div class="agent-messages" id="agentMessages">
+            <div class="message assistant">Xin chào. Bạn có thể hỏi tôi về chương trình đào tạo, kết quả học tập và các học phần phù hợp để đăng ký.</div>
+          </div>
+          <div class="suggestions">
+            <button type="button">Tôi còn thiếu những môn bắt buộc nào?</button>
+            <button type="button">Các môn nào tôi đã rớt và cần học lại?</button>
+            <button type="button">Liệt kê các môn tự chọn tôi chưa học.</button>
+          </div>
+          <form class="agent-composer" id="agentForm">
+            <textarea id="agentInput" placeholder="Nhập câu hỏi về đăng ký học phần..."></textarea>
+            <button type="submit">Gửi</button>
+          </form>
+        </section>
+        <button class="floating-agent" id="agentToggle" aria-label="Mở trợ lý đăng ký học phần">🤖</button>`;
+    }
+
+    function bindShellEvents() {
+      document.getElementById("logoutButton")?.addEventListener("click", () => {
+        sessionStorage.removeItem("portalLoggedIn");
+        navigate("/login");
+      });
+      document.getElementById("drawerToggle")?.addEventListener("click", () => {
+        document.getElementById("sidebar")?.classList.toggle("open");
+      });
+    }
+
+    function bindPageEvents(current) {
+      if (current === "/student") {
+        const input = document.getElementById("notificationSearch");
+        input?.addEventListener("input", () => {
+          const q = input.value.trim().toLowerCase();
+          const rows = notifications.filter(item => item.title.toLowerCase().includes(q));
+          document.getElementById("notificationRows").innerHTML = notificationRows(rows);
+        });
+      }
+      if (current === "/student/studyprograms") {
+        document.getElementById("termFilter")?.addEventListener("change", (event) => {
+          const value = event.target.value;
+          document.querySelectorAll("[data-term]").forEach(row => {
+            row.classList.toggle("hidden", value && row.dataset.term !== value);
+          });
+        });
+      }
+      if (current === "/student/marks") {
+        const filter = () => {
+          const y = document.getElementById("markYear").value;
+          const s = document.getElementById("markSem").value;
+          const rows = marks.filter(row => (!y || row.year === y) && (!s || row.sem === s));
+          document.getElementById("marksRows").innerHTML = rows.length ? marksRows(rows) : `<tr><td colspan="10" class="center">Không có kết quả học tập phù hợp với bộ lọc.</td></tr>`;
+        };
+        document.getElementById("markYear")?.addEventListener("change", filter);
+        document.getElementById("markSem")?.addEventListener("change", filter);
+      }
+    }
+
+    function bindAgentEvents() {
+      document.getElementById("agentToggle")?.addEventListener("click", () => {
+        const panel = document.getElementById("agentPanel");
+        panel.classList.toggle("hidden");
+        sessionStorage.agentOpen = panel.classList.contains("hidden") ? "0" : "1";
+      });
+      document.getElementById("agentClose")?.addEventListener("click", () => {
+        document.getElementById("agentPanel").classList.add("hidden");
+        sessionStorage.agentOpen = "0";
+      });
+      document.querySelectorAll(".suggestions button").forEach(button => {
+        button.addEventListener("click", () => sendAgentMessage(button.textContent));
+      });
+      document.getElementById("agentForm")?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const input = document.getElementById("agentInput");
+        const value = input.value.trim();
+        if (!value) return;
+        input.value = "";
+        sendAgentMessage(value);
+      });
+      document.getElementById("agentInput")?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          document.getElementById("agentForm").requestSubmit();
+        }
+      });
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          document.getElementById("agentPanel")?.classList.add("hidden");
+          sessionStorage.agentOpen = "0";
+        }
+      }, { once: true });
+    }
+
+    function sendAgentMessage(text) {
+      const box = document.getElementById("agentMessages");
+      box.insertAdjacentHTML("beforeend", `<div class="message user">${escapeHtml(text)}</div>`);
+      const lower = text.toLowerCase();
+      let answer = "Hệ thống demo đang mô phỏng trả lời. Bạn có thể hỏi về chương trình đào tạo, kết quả học tập hoặc lớp học phần kỳ hiện tại.";
+      let table = "";
+      if (lower.includes("rớt") || lower.includes("rot") || lower.includes("học lại")) {
+        answer = "Sinh viên có một lần không đạt môn Database System và đã học lại đạt ở học kỳ sau.";
+        table = agentTable(["Mã môn", "Tên môn", "Kết quả", "Ghi chú"], [["DBSY230184E", "Database System", "Đạt", "Học lại"]]);
+      } else if (lower.includes("tự chọn") || lower.includes("tu chon")) {
+        answer = "Một số học phần tự chọn chưa học được liệt kê bên dưới.";
+        table = agentTable(["Mã môn", "Tên môn", "TC"], curriculumRows.filter(r => r.type === "Tự chọn").slice(0, 4).map(r => [r.code, r.name, r.credits]));
+      } else if (lower.includes("bắt buộc") || lower.includes("bat buoc") || lower.includes("thiếu")) {
+        answer = "Các học phần bắt buộc nên được kiểm tra theo tiến độ CTĐT. Bảng dưới là mẫu học phần bắt buộc trong chương trình.";
+        table = agentTable(["Mã môn", "Tên môn", "TC"], curriculumRows.filter(r => r.type === "Bắt buộc").slice(0, 4).map(r => [r.code, r.name, r.credits]));
+      }
+      box.insertAdjacentHTML("beforeend", `<div class="message assistant">${answer}${table}</div>`);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function agentTable(headers, rows) {
+      return `<div class="table-wrap" style="margin-top:6px"><table aria-label="Kết quả trợ lý"><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    }
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    window.addEventListener("hashchange", render);
+    render();
+  </script>
+</body>
+</html>
