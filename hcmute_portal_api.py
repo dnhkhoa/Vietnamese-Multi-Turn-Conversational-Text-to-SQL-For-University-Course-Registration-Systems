@@ -38,6 +38,15 @@ def verify_password(account: sqlite3.Row, password: str) -> bool:
     return digest == account["MatKhauHash"]
 
 
+def mask_citizen_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = str(value)
+    if len(text) <= 4:
+        return text
+    return "*" * (len(text) - 4) + text[-4:]
+
+
 def get_student_payload(ma_sv: str) -> dict[str, Any] | None:
     with connect_db() as conn:
         row = conn.execute(
@@ -47,12 +56,33 @@ def get_student_payload(ma_sv: str) -> dict[str, Any] | None:
                 sv.HoTen,
                 sv.TrangThai AS TrangThaiSV,
                 sv.MaKhoaHoc,
+                sv.GioiTinh,
+                sv.NgaySinh,
+                sv.NoiSinh,
+                sv.QuocTich,
+                sv.DanToc,
+                sv.TonGiao,
+                sv.CCCD,
+                sv.NgayCapCCCD,
+                sv.NoiCapCCCD,
+                sv.SoDienThoai,
+                sv.EmailCaNhan,
+                sv.DiaChiThuongTru,
+                sv.DiaChiTamTru,
+                sv.LopQuanLy,
+                sv.BacDaoTao,
+                sv.HeDaoTao,
+                sv.LoaiHinhDaoTao,
+                sv.NgayNhapHoc,
                 kh.TenKhoaHoc,
                 ct.MaCTDT,
                 ct.TenCTDT,
                 n.MaNganh,
                 n.TenNganh,
                 tk.Email,
+                tk.AnhDaiDienUrl,
+                tk.EmailXacThuc,
+                tk.SoDienThoaiXacThuc,
                 hs.NhomHoSo,
                 hs.GPA,
                 hs.TinChiTichLuy,
@@ -71,26 +101,33 @@ def get_student_payload(ma_sv: str) -> dict[str, Any] | None:
             """,
             {"ma_sv": ma_sv},
         ).fetchone()
+        contacts = [
+            dict(contact)
+            for contact in conn.execute(
+                """
+                SELECT QuanHe, HoTen, SoDienThoai, DiaChi, Email, LaLienHeKhanCap
+                FROM SinhVienLienHe
+                WHERE MaSV = :ma_sv
+                ORDER BY LaLienHeKhanCap DESC, QuanHe
+                """,
+                {"ma_sv": ma_sv},
+            ).fetchall()
+        ]
     if row is None:
         return None
     data = dict(row)
+    data["LienHe"] = contacts
     required_credits = data.get("TongTinChiToiThieu") or 0
     accumulated_credits = data.get("TinChiTichLuy") or 0
     data["PhanTramTinChiHoanThanh"] = round(accumulated_credits * 100 / required_credits, 2) if required_credits else 0
+    data["CCCDMasked"] = mask_citizen_id(data.get("CCCD"))
+    data["DiaChi"] = data.get("DiaChiTamTru") or data.get("DiaChiThuongTru")
+    data["ImageUrl"] = data.get("AnhDaiDienUrl")
     data.update(
         {
             "LoaiNguoiHoc": "SV/HV/NCS",
             "TrangThaiHienThi": "Còn học" if data.get("TrangThaiSV") == "DANG_HOC" else data.get("TrangThaiSV"),
-            "GioiTinh": None,
-            "NgaySinh": None,
-            "NoiSinh": None,
-            "NoiDangKyKhaiSinh": None,
-            "CCCDMasked": None,
-            "DanToc": None,
-            "TonGiao": None,
-            "SoDienThoai": None,
-            "DiaChi": None,
-            "ImageUrl": None,
+            "NoiDangKyKhaiSinh": data.get("NoiSinh"),
         }
     )
     return data
