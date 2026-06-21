@@ -23,16 +23,16 @@ def test_course_alias_search(engine: VietnameseNL2SQLEngine) -> None:
     assert result.intent == "COURSE_OFFERING_SEARCH"
     assert result.slots["MaMH"] == "DBSY230184E"
     assert not result.dataframe.empty
-    assert set(result.dataframe["TenMH"]) == {"Database Systems"}
+    assert set(result.dataframe["TenMH"]) == {"Database System"}
 
 
 def test_context_filter_and_change_entity(engine: VietnameseNL2SQLEngine) -> None:
-    engine.ask("Cho tôi xem các lớp môn CSDL")
+    engine.ask("Cho toi xem cac lop mon thiet ke mang")
     filtered = engine.ask("Chỉ lấy lớp buổi sáng còn chỗ")
     changed = engine.ask("Đổi sang môn AI")
 
     assert filtered.edit_operation == "ADD_FILTER"
-    assert filtered.slots["MaMH"] == "DBSY230184E"
+    assert filtered.slots["MaMH"] == "CNDE430780E"
     assert filtered.slots["Buoi"] == "SANG"
     assert filtered.slots["CoTheDangKy"] == 1
     assert not filtered.dataframe.empty
@@ -49,12 +49,12 @@ def test_reference_resolution_for_prerequisite(engine: VietnameseNL2SQLEngine) -
     assert result.edit_operation == "RESOLVE_REFERENCE"
     assert result.slots["MaMH"] == "ARIN330585E"
     assert not result.dataframe.empty
-    assert "Data Structures and Algorithms" in set(result.dataframe["TenMHTQ"])
+    assert "Data Structures and Algorithms (2+1)" in set(result.dataframe["TenMHTQ"])
 
 
 def test_new_student_query_resets_stale_course_context(engine: VietnameseNL2SQLEngine) -> None:
     engine.ask("Cho tôi xem các lớp môn AI")
-    result = engine.ask("Sinh viên 23110001 đã đăng ký những lớp nào kỳ 1?")
+    result = engine.ask("Sinh vien 23110001 da dang ky nhung lop nao ky nay?")
 
     assert result.intent == "STUDENT_REGISTRATION_LOOKUP"
     assert result.slots["MaSV"] == "23110001"
@@ -98,7 +98,7 @@ def test_limit_edit_on_previous_statistics_query(engine: VietnameseNL2SQLEngine)
 def test_engine_connection_can_be_reused_from_streamlit_style_thread() -> None:
     engine = VietnameseNL2SQLEngine()
     try:
-        engine.ask("Cho tôi xem các lớp môn CSDL")
+        engine.ask("Cho toi xem cac lop mon thiet ke mang")
         with ThreadPoolExecutor(max_workers=1) as executor:
             result = executor.submit(engine.ask, "Chỉ lấy lớp buổi sáng còn chỗ").result()
     finally:
@@ -114,7 +114,7 @@ def test_curriculum_followup_with_suggested_semester(engine: VietnameseNL2SQLEng
 
     assert result.intent == "CURRICULUM_COURSE_SEARCH"
     assert result.edit_operation == "ADD_FILTER"
-    assert result.slots["MaNganh"] == "10"
+    assert result.slots["MaNganh"] == "CNTT"
     assert result.slots["LoaiYC"] == "BAT_BUOC"
     assert result.slots["HocKy"] == 5
 
@@ -133,7 +133,7 @@ def test_course_name_does_not_pollute_major_slots(engine: VietnameseNL2SQLEngine
     result = engine.ask("Có bao nhiêu sinh viên đăng ký môn Mạng máy tính?")
 
     assert result.intent == "AGGREGATION_STATISTICS"
-    assert result.slots["MaMH"] == "NECO330282E"
+    assert result.slots["MaMH"] == "NEES330380E"
     assert "MaNganh" not in result.slots
     assert not result.dataframe.empty
 
@@ -165,7 +165,7 @@ def test_hybrid_parser_uses_valid_external_state() -> None:
     assert result.parser_source == "qwen"
     assert result.intent == "COURSE_OFFERING_SEARCH"
     assert result.slots["MaMH"] == "DBSY230184E"
-    assert result.slots["TenMH"] == "Database Systems"
+    assert result.slots["TenMH"] == "Database System"
     assert not result.dataframe.empty
 
 
