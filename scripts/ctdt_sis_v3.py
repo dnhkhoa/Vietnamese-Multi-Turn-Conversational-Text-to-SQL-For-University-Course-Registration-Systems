@@ -191,6 +191,177 @@ def sync_current_registration_config(conn: sqlite3.Connection) -> tuple[int, int
     return int(semester["NamHoc"]), int(semester["HocKy"])
 
 
+def has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    return any(row["name"] == column_name for row in conn.execute(f"PRAGMA table_info({table_name})"))
+
+
+def add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    if not has_column(conn, table_name, column_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def ensure_student_identity_schema(conn: sqlite3.Connection) -> None:
+    sinh_vien_columns = {
+        "GioiTinh": "TEXT",
+        "NgaySinh": "TEXT",
+        "NoiSinh": "TEXT",
+        "QuocTich": "TEXT",
+        "DanToc": "TEXT",
+        "TonGiao": "TEXT",
+        "CCCD": "TEXT",
+        "NgayCapCCCD": "TEXT",
+        "NoiCapCCCD": "TEXT",
+        "SoDienThoai": "TEXT",
+        "EmailCaNhan": "TEXT",
+        "DiaChiThuongTru": "TEXT",
+        "DiaChiTamTru": "TEXT",
+        "LopQuanLy": "TEXT",
+        "BacDaoTao": "TEXT",
+        "HeDaoTao": "TEXT",
+        "LoaiHinhDaoTao": "TEXT",
+        "NgayNhapHoc": "TEXT",
+    }
+    for column_name, definition in sinh_vien_columns.items():
+        add_column_if_missing(conn, "SinhVien", column_name, definition)
+
+    tai_khoan_columns = {
+        "AnhDaiDienUrl": "TEXT",
+        "EmailXacThuc": "TEXT",
+        "SoDienThoaiXacThuc": "TEXT",
+        "LanDoiMatKhauCuoi": "TEXT",
+        "YeuCauDoiMatKhau": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column_name, definition in tai_khoan_columns.items():
+        add_column_if_missing(conn, "TaiKhoan", column_name, definition)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS SinhVienLienHe (
+            MaLienHe TEXT PRIMARY KEY,
+            MaSV TEXT NOT NULL,
+            QuanHe TEXT NOT NULL,
+            HoTen TEXT NOT NULL,
+            SoDienThoai TEXT,
+            DiaChi TEXT,
+            Email TEXT,
+            LaLienHeKhanCap INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (MaSV) REFERENCES SinhVien(MaSV)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sinh_vien_lien_he_masv ON SinhVienLienHe(MaSV)")
+
+    conn.execute(
+        """
+        WITH profile AS (
+          SELECT
+            sv.MaSV,
+            kh.NamNhapHoc,
+            COALESCE(n.BacDaoTao, 'Đại học') AS BacDaoTao,
+            COALESCE(n.HeDaoTao, 'Chính quy') AS HeDaoTao,
+            CAST(substr(sv.MaSV, -2) AS INTEGER) AS seed2,
+            CAST(substr(sv.MaSV, -4) AS INTEGER) AS seed4,
+            CAST(substr(sv.MaSV, -6) AS INTEGER) AS seed6
+          FROM SinhVien sv
+          JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
+          JOIN Nganh n ON n.MaNganh = kh.MaNganh
+        )
+        UPDATE SinhVien
+        SET
+            GioiTinh = CASE WHEN (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 2 = 0 THEN 'Nam' ELSE 'Nữ' END,
+            NgaySinh = printf(
+                '%04d-%02d-%02d',
+                (SELECT NamNhapHoc - 18 FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+                ((SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 12) + 1,
+                ((SELECT seed4 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 28) + 1
+            ),
+            NoiSinh = CASE (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 6
+                WHEN 0 THEN 'TP. Hồ Chí Minh'
+                WHEN 1 THEN 'Đồng Nai'
+                WHEN 2 THEN 'Bình Dương'
+                WHEN 3 THEN 'Long An'
+                WHEN 4 THEN 'Tiền Giang'
+                ELSE 'Bà Rịa - Vũng Tàu'
+            END,
+            QuocTich = 'Việt Nam',
+            DanToc = CASE WHEN (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 20 = 0 THEN 'Hoa' ELSE 'Kinh' END,
+            TonGiao = CASE WHEN (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 9 = 0 THEN 'Phật giáo' ELSE 'Không' END,
+            CCCD = printf('%012d', CAST(MaSV AS INTEGER)),
+            NgayCapCCCD = date(
+                printf(
+                    '%04d-%02d-%02d',
+                    (SELECT NamNhapHoc - 18 FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+                    ((SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 12) + 1,
+                    ((SELECT seed4 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 28) + 1
+                ),
+                '+18 years',
+                '+30 days'
+            ),
+            NoiCapCCCD = 'Cục Cảnh sát QLHC về TTXH',
+            SoDienThoai = printf('09%08d', (SELECT seed6 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 100000000),
+            EmailCaNhan = lower(MaSV || '@gmail.com'),
+            DiaChiThuongTru = CASE (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 6
+                WHEN 0 THEN 'TP. Hồ Chí Minh'
+                WHEN 1 THEN 'Đồng Nai'
+                WHEN 2 THEN 'Bình Dương'
+                WHEN 3 THEN 'Long An'
+                WHEN 4 THEN 'Tiền Giang'
+                ELSE 'Bà Rịa - Vũng Tàu'
+            END,
+            DiaChiTamTru = 'TP. Hồ Chí Minh',
+            LopQuanLy = MaKhoaHoc || '_' || printf('%02d', ((SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 6) + 1),
+            BacDaoTao = (SELECT BacDaoTao FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+            HeDaoTao = (SELECT HeDaoTao FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+            LoaiHinhDaoTao = 'Chính quy',
+            NgayNhapHoc = printf('%04d-09-05', (SELECT NamNhapHoc FROM profile WHERE profile.MaSV = SinhVien.MaSV))
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE TaiKhoan
+        SET
+            AnhDaiDienUrl = COALESCE(AnhDaiDienUrl, '/references/ute_logo.png'),
+            EmailXacThuc = COALESCE(EmailXacThuc, Email),
+            SoDienThoaiXacThuc = COALESCE(
+                SoDienThoaiXacThuc,
+                (SELECT SoDienThoai FROM SinhVien WHERE SinhVien.MaSV = TaiKhoan.MaSV)
+            ),
+            LanDoiMatKhauCuoi = COALESCE(LanDoiMatKhauCuoi, ThoiDiemTao),
+            YeuCauDoiMatKhau = COALESCE(YeuCauDoiMatKhau, 0)
+        """
+    )
+
+    conn.execute("DELETE FROM SinhVienLienHe")
+    conn.execute(
+        """
+        INSERT INTO SinhVienLienHe
+            (MaLienHe, MaSV, QuanHe, HoTen, SoDienThoai, DiaChi, Email, LaLienHeKhanCap)
+        SELECT
+            'LH_' || MaSV || '_ME',
+            MaSV,
+            'ME',
+            'Phụ huynh ' || HoTen,
+            printf('08%08d', (CAST(substr(MaSV, -6) AS INTEGER) + 1703) % 100000000),
+            DiaChiThuongTru,
+            NULL,
+            1
+        FROM SinhVien
+        UNION ALL
+        SELECT
+            'LH_' || MaSV || '_CHA',
+            MaSV,
+            'CHA',
+            'Phụ huynh ' || HoTen,
+            printf('03%08d', (CAST(substr(MaSV, -6) AS INTEGER) + 2707) % 100000000),
+            DiaChiThuongTru,
+            NULL,
+            0
+        FROM SinhVien
+        """
+    )
+
+
 def remove_non_current_registrations(conn: sqlite3.Connection) -> int:
     rows = conn.execute(
         """
@@ -1806,6 +1977,7 @@ def migrate(db_path: Path) -> None:
         conn.execute("BEGIN")
         refresh_system_semesters(conn)
         sync_current_registration_config(conn)
+        ensure_student_identity_schema(conn)
         removed_non_current_count = remove_non_current_registrations(conn)
         removed_prereq_count = remove_strict_prerequisite_violations(conn)
         filled_hk_goi_y_count = normalize_required_course_suggested_terms(conn)

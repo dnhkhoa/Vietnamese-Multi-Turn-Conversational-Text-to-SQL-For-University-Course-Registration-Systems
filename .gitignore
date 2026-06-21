@@ -43,3 +43,6 @@ viedu-unsloth-local/outputs/logs/*
 
 # Root duplicate from Colab; canonical notebook is under viedu-unsloth-local/notebooks.
 /viedu_unsloth_colab_qwen3b.ipynb
+
+/docs/*.docx
+/references/
