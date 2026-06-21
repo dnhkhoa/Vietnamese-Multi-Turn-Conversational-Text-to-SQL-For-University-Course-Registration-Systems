@@ -50,6 +50,14 @@ def dataframe_from_rows(rows: Iterable[sqlite3.Row | Dict[str, Any]]) -> pd.Data
     return pd.DataFrame([dict(row) for row in rows])
 
 
+def table_or_view_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = ? AND type IN ('table', 'view')",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
 @dataclass
 class QueryContext:
     intent: Optional[str] = None
@@ -96,6 +104,9 @@ class Catalog:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self.courses = self._load_courses()
+        self.course_alias_canonical: Dict[str, str] = {}
+        self.course_alias_requires_context: Dict[str, bool] = {}
+        self.course_alias_priority: Dict[str, int] = {}
         self.course_aliases = self._build_course_aliases()
         self.majors = self._load_majors()
         self.major_aliases = self._build_major_aliases()
@@ -118,8 +129,104 @@ class Catalog:
             manual = COURSE_ALIASES.get(ma_mh, [])
             names.update(manual)
             for name in names:
-                alias_map[normalize_text(name)] = ma_mh
+                key = normalize_text(name)
+                alias_map[key] = ma_mh
+                self.course_alias_canonical[key] = normalize_text(course["TenMH"])
+                self.course_alias_requires_context[key] = False
+                self.course_alias_priority[key] = 50
+        if table_or_view_exists(self.conn, "MonHocAlias"):
+            columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(MonHocAlias)")}
+            if {"AliasKey", "CanonicalText"}.issubset(columns):
+                rows = self.conn.execute(
+                    """
+                    SELECT MaMH, Alias, AliasKey, CanonicalText,
+                           DoUuTien, YeuCauNguCanh
+                    FROM MonHocAlias
+                    WHERE IsActive = 1
+                    ORDER BY DoUuTien, AliasID
+                    """
+                ).fetchall()
+            else:
+                rows = self.conn.execute(
+                    """
+                    SELECT MaMH, Alias, AliasNormalized AS AliasKey,
+                           AliasNormalized AS CanonicalText,
+                           100 AS DoUuTien, 0 AS YeuCauNguCanh
+                    FROM MonHocAlias
+                    """
+                ).fetchall()
+            valid_courses = {str(course["MaMH"]).upper() for course in self.courses}
+            for row in rows:
+                ma_mh = str(row["MaMH"]).upper()
+                if ma_mh not in valid_courses:
+                    continue
+                for value in (row["Alias"], row["AliasKey"]):
+                    if value:
+                        key = normalize_text(str(value))
+                        alias_map[key] = ma_mh
+                        self.course_alias_canonical[key] = normalize_text(str(row["CanonicalText"]))
+                        self.course_alias_requires_context[key] = bool(row["YeuCauNguCanh"])
+                        self.course_alias_priority[key] = int(row["DoUuTien"])
         return alias_map
+
+    @staticmethod
+    def _has_course_context(norm_text: str) -> bool:
+        return any(
+            marker in norm_text
+            for marker in ["mon", "lop", "hoc phan", "dang ky", "dang ki", "tien quyet", "lich", "tin chi"]
+        )
+
+    def _exact_course_match(self, norm_text: str) -> Optional[str]:
+        has_context = self._has_course_context(norm_text)
+        matches = []
+        for alias, ma_mh in self.course_aliases.items():
+            if self.course_alias_requires_context.get(alias, False) and not has_context:
+                continue
+            if re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", norm_text):
+                matches.append((len(alias), self.course_alias_priority.get(alias, 0), ma_mh))
+        return max(matches)[2] if matches else None
+
+    def canonicalize_course_mentions(self, text: str) -> Tuple[str, List[str]]:
+        normalized = normalize_text(text)
+        has_context = self._has_course_context(normalized)
+        matched_courses: List[str] = []
+        candidates: List[Tuple[int, int, int, int, str, str]] = []
+        for alias in self.course_aliases:
+            if self.course_alias_requires_context.get(alias, False) and not has_context:
+                continue
+            pattern = rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])"
+            for match in re.finditer(pattern, normalized):
+                candidates.append(
+                    (
+                        match.start(),
+                        match.end(),
+                        len(alias),
+                        self.course_alias_priority.get(alias, 0),
+                        alias,
+                        self.course_aliases[alias],
+                    )
+                )
+
+        selected: List[Tuple[int, int, int, int, str, str]] = []
+        occupied: set[int] = set()
+        for candidate in sorted(candidates, key=lambda item: (-item[2], -item[3], item[0])):
+            start, end = candidate[0], candidate[1]
+            if any(position in occupied for position in range(start, end)):
+                continue
+            selected.append(candidate)
+            occupied.update(range(start, end))
+
+        parts: List[str] = []
+        cursor = 0
+        for start, end, _, _, alias, ma_mh in sorted(selected, key=lambda item: item[0]):
+            parts.append(normalized[cursor:start])
+            parts.append(self.course_alias_canonical.get(alias, alias))
+            cursor = end
+            if ma_mh not in matched_courses:
+                matched_courses.append(ma_mh)
+        parts.append(normalized[cursor:])
+        canonicalized = re.sub(r"\s+", " ", "".join(parts)).strip()
+        return canonicalized, matched_courses
 
     def _build_major_aliases(self) -> Dict[str, str]:
         alias_map: Dict[str, str] = {}
@@ -138,11 +245,16 @@ class Catalog:
         allow_fuzzy: bool = True,
     ) -> Optional[Dict[str, Any]]:
         norm_text = normalize_text(text)
-        ma_mh = self._exact_entity_match(norm_text, self.course_aliases)
+        ma_mh = self._exact_course_match(norm_text)
         if ma_mh is None and allow_fuzzy:
+            fuzzy_aliases = [
+                alias
+                for alias in self.course_aliases
+                if not self.course_alias_requires_context.get(alias, False)
+            ]
             match = process.extractOne(
                 norm_text,
-                list(self.course_aliases.keys()),
+                fuzzy_aliases,
                 scorer=fuzz.WRatio,
             )
             if match and match[1] >= threshold:
@@ -206,6 +318,7 @@ class VietnameseNL2SQLEngine:
         parser_mode: str = "rule",
         lora_path: Optional[Path | str] = None,
         remote_api_url: Optional[str] = None,
+        repair_model_output: bool = True,
     ):
         self.db_path = Path(db_path)
         self.context = QueryContext()
@@ -214,6 +327,7 @@ class VietnameseNL2SQLEngine:
         apply_views_if_missing(self.conn)
         self.catalog = Catalog(self.conn)
         self.parser_mode = parser_mode
+        self.repair_model_output = repair_model_output
         self.state_parser = state_parser
         self.parser_load_error: Optional[str] = None
         if self.parser_mode == "remote" and self.state_parser is None:
@@ -275,7 +389,11 @@ class VietnameseNL2SQLEngine:
             return result
 
     def _parse(self, user_text: str, previous: QueryContext) -> Dict[str, Any]:
-        rule_parsed = self._parse_rule(user_text, previous)
+        canonical_text, linked_courses = self.catalog.canonicalize_course_mentions(user_text)
+        linked_course = linked_courses[0] if len(linked_courses) == 1 else None
+        rule_parsed = self._parse_rule(canonical_text, previous)
+        if linked_course:
+            rule_parsed["slots"]["MaMH"] = linked_course
         if self.parser_mode not in {"hybrid", "remote"} or self.state_parser is None:
             if self.parser_load_error:
                 rule_parsed["parser_warning"] = self.parser_load_error
@@ -283,8 +401,17 @@ class VietnameseNL2SQLEngine:
 
         previous_state = self._previous_state(previous)
         try:
-            llm_state = self.state_parser.parse(user_text, previous_state)
-            llm_parsed = self._normalize_external_state(llm_state.as_dict(), user_text)
+            llm_state = self.state_parser.parse(canonical_text, previous_state)
+            if self.repair_model_output:
+                llm_parsed = self._normalize_external_state(llm_state.as_dict(), canonical_text, previous, rule_parsed)
+            else:
+                llm_parsed = {
+                    "intent": llm_state.intent,
+                    "edit_operation": llm_state.edit_operation,
+                    "slots": dict(llm_state.slots),
+                }
+            if linked_course:
+                llm_parsed["slots"]["MaMH"] = linked_course
             llm_parsed["parser_source"] = "qwen"
             return llm_parsed
         except Exception as exc:
@@ -324,7 +451,13 @@ class VietnameseNL2SQLEngine:
             "slots": dict(previous.slots),
         }
 
-    def _normalize_external_state(self, state: Dict[str, Any], user_text: str) -> Dict[str, Any]:
+    def _normalize_external_state(
+        self,
+        state: Dict[str, Any],
+        user_text: str,
+        previous: Optional[QueryContext] = None,
+        rule_parsed: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         parsed = validate_state(state)
         slots = dict(parsed.slots)
 
