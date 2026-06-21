@@ -89,6 +89,14 @@
       box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 7px #e51b3e;
     }
 
+    .brand-logo-img {
+      width: 88px;
+      height: 114px;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto 4px;
+    }
+
     .brand-logo small {
       display: block;
       color: #e51b3e;
@@ -278,6 +286,13 @@
       margin-bottom: 8px;
       border-width: 3px;
       font-size: 15px;
+    }
+
+    .sidebar-logo .brand-logo-img {
+      width: 118px;
+      height: 144px;
+      margin: -4px auto 0;
+      object-fit: contain;
     }
 
     .sidebar-logo span {
@@ -854,7 +869,7 @@
   <div id="app"></div>
 
   <script>
-    const student = {
+    const fallbackStudent = {
       id: "22110001",
       name: "Hoàng Minh Mai",
       type: "SV/HV/NCS",
@@ -877,15 +892,16 @@
       requiredCredits: 150,
       currentCredits: 13
     };
+    let student = { ...fallbackStudent };
 
-    const notifications = [
+    let notifications = [
       { title: "Thông báo lịch đăng ký học phần học kỳ 2 năm 2026", sender: "Phòng Đào tạo", time: "20/06/2026 08:00" },
       { title: "Hướng dẫn tra cứu chương trình đào tạo và kết quả học tập", sender: "Phòng CTSV", time: "18/06/2026 15:35" },
       { title: "Cập nhật dữ liệu lớp học phần trên cổng thông tin", sender: "Trung tâm dữ liệu", time: "15/06/2026 09:20" },
       { title: "Nhắc sinh viên kiểm tra thông tin cá nhân", sender: "Phòng Đào tạo", time: "10/06/2026 10:10" }
     ];
 
-    const curriculumRows = [
+    let curriculumRows = [
       { code: "ADNT330580E", name: "Advanced Networking Technology", credits: 3, type: "Bắt buộc", term: 1, prereq: "Data communications; Networking Essentials" },
       { code: "AMHC333179E", name: "Agile methods (2+1)", credits: 3, type: "Bắt buộc", term: 1, prereq: "Software Engineering" },
       { code: "BCAP433280", name: "Blockchain và ứng dụng", credits: 3, type: "Bắt buộc", term: 1, prereq: "Data Structures and Algorithms" },
@@ -896,20 +912,13 @@
       { code: "INRE431084E", name: "Information Retrieval", credits: 3, type: "Tự chọn", term: "", prereq: "Data Structures and Algorithms; Database System" }
     ];
 
-    const marks = [
+    let marks = [
       { year: "2022", sem: "1", code: "ACEN340535E", name: "Academic English 1", credits: 4, score10: 7.3, score4: 3.0, letter: "B", result: "Đạt", note: "" },
       { year: "2022", sem: "1", code: "MATH132401E", name: "Calculus I", credits: 3, score10: 6.5, score4: 2.5, letter: "C+", result: "Đạt", note: "" },
       { year: "2022", sem: "1", code: "INPR130285E", name: "Introduction to Programming", credits: 3, score10: 8.3, score4: 3.5, letter: "B+", result: "Đạt", note: "" },
       { year: "2023", sem: "1", code: "DBSY230184E", name: "Database System", credits: 3, score10: 4.7, score4: 0, letter: "F", result: "Không đạt", note: "Lần học 1" },
       { year: "2023", sem: "2", code: "DBSY230184E", name: "Database System", credits: 3, score10: 6.0, score4: 2.0, letter: "C", result: "Đạt", note: "Học lại" },
       { year: "2026", sem: "2", code: "ETHA332080E", name: "Ethical Hacking (2+1)", credits: 3, score10: "", score4: "", letter: "", result: "Đang học", note: "" }
-    ];
-
-    const offerings = [
-      { id: "LHP202620020", code: "ACEN440735E", name: "Academic English 3", group: "01", credits: 4, status: "Đầy", schedule: "Thứ 7 tiết 7-10 phòng A3-202", teacher: "Nguyễn Thanh Đạt" },
-      { id: "LHP202620024", code: "GDQP008031E", name: "Military Education 1 (*)", group: "01", credits: 1, status: "Đóng", schedule: "Thứ 7 tiết 8-10 phòng A4-404", teacher: "Nguyễn Minh Khang" },
-      { id: "LHP202620179", code: "CNDE430780E", name: "Network Design (2+1)", group: "03", credits: 3, status: "Mở", schedule: "Thứ 5 tiết 1-5; Thứ 7 tiết 1-3", teacher: "Trần Minh Quyên" },
-      { id: "LHP202620207", code: "ETHA332080E", name: "Ethical Hacking (2+1)", group: "01", credits: 3, status: "Mở", schedule: "Thứ 3 tiết 7-10; Thứ 5 tiết 1-4", teacher: "Nguyễn Hữu Nam" }
     ];
 
     const routes = {
@@ -919,6 +928,117 @@
       "/student/marks": { title: "KẾT QUẢ HỌC TẬP", render: renderMarks },
       "/student/RegistScheduleUnit": { title: "ĐĂNG KÝ HỌC PHẦN", render: renderRegistration }
     };
+
+    const api = {
+      async get(path) {
+        const response = await fetch(path, { headers: { "Accept": "application/json" } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      },
+      async post(path, body) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+        return payload;
+      }
+    };
+
+    function mapApiStudent(row) {
+      if (!row) return { ...fallbackStudent };
+      return {
+        id: row.MaSV || fallbackStudent.id,
+        name: row.HoTen || fallbackStudent.name,
+        type: row.LoaiNguoiHoc || "SV/HV/NCS",
+        status: row.TrangThaiHienThi || row.TrangThaiSV || fallbackStudent.status,
+        major: row.TenNganh || fallbackStudent.major,
+        className: row.MaKhoaHoc || fallbackStudent.className,
+        program: row.TenCTDT || fallbackStudent.program,
+        programCode: row.MaCTDT || "",
+        course: row.TenKhoaHoc || row.MaKhoaHoc || fallbackStudent.course,
+        birthDate: row.NgaySinh || "Chưa cập nhật",
+        birthPlace: row.NoiSinh || "Chưa cập nhật",
+        gender: row.GioiTinh || "Chưa cập nhật",
+        citizenId: row.CCCDMasked || "Chưa cập nhật",
+        ethnicity: row.DanToc || "Chưa cập nhật",
+        religion: row.TonGiao || "Chưa cập nhật",
+        phone: row.SoDienThoai || "Chưa cập nhật",
+        email: row.Email || fallbackStudent.email,
+        address: row.DiaChi || "Chưa cập nhật",
+        imageUrl: row.ImageUrl || "",
+        gpa: row.GPA ?? fallbackStudent.gpa,
+        credits: row.TinChiTichLuy ?? fallbackStudent.credits,
+        requiredCredits: row.TongTinChiToiThieu ?? fallbackStudent.requiredCredits,
+        currentCredits: row.TinChiDangKyHienTai ?? fallbackStudent.currentCredits,
+        warning: row.CanhBaoHocVu || "",
+        note: row.GhiChu || ""
+      };
+    }
+
+    function mapApiCurriculum(items) {
+      return items.map((item, index) => {
+        if (item.type !== "course") return item;
+        return {
+          type: "course",
+          index: item.index || index + 1,
+          group: item.group || "",
+          requirement: item.requirement || item.LoaiYC || "Bắt buộc",
+          code: item.code || item.MaMH || "",
+          name: item.name || item.TenMH || "",
+          electiveGroup: item.electiveGroup || item.TenNhomTC || "",
+          credits: item.credits || item.SoTC || "",
+          lectureHours: item.lectureHours || item.SoTietLT || "",
+          practiceHours: item.practiceHours || item.SoTietTH || "",
+          prerequisite: item.prerequisite || item.HocPhanTienQuyetText || "",
+          prior: item.prior || item.HocPhanHocTruocText || "",
+          equivalent: item.equivalent || item.HocPhanTuongDuongText || "",
+          department: item.department || item.TenKhoaBM || "",
+          outline: item.outline || ""
+        };
+      });
+    }
+
+    function mapApiMarks(items) {
+      return items.map(item => ({
+        year: String(item.year || ""),
+        sem: String(item.semester || ""),
+        code: item.code,
+        name: item.name,
+        credits: item.credits,
+        score10: item.score10 ?? "",
+        score4: item.score4 ?? "",
+        letter: item.letter || "",
+        result: item.result === "KHONG_DAT" ? "Không đạt" : item.result === "DANG_HOC" ? "Đang học" : "Đạt",
+        note: item.note || item.studyType || ""
+      }));
+    }
+
+    async function loadPortalData() {
+      if (!isLoggedIn()) return;
+      const maSv = sessionStorage.portalStudentId || student.id;
+      try {
+        const [studentPayload, notificationPayload, curriculumPayload, marksPayload] = await Promise.all([
+          api.get(`/api/student?ma_sv=${encodeURIComponent(maSv)}`),
+          api.get("/api/notifications"),
+          api.get("/api/curriculum"),
+          api.get(`/api/marks?ma_sv=${encodeURIComponent(maSv)}`)
+        ]);
+        if (studentPayload.student) {
+          student = mapApiStudent(studentPayload.student);
+          sessionStorage.portalStudent = JSON.stringify(student);
+          sessionStorage.portalStudentId = student.id;
+        }
+        notifications = notificationPayload.items || notifications;
+        curriculumRows = mapApiCurriculum(curriculumPayload.items || curriculumRows);
+        marks = mapApiMarks(marksPayload.items || marks);
+      } catch (error) {
+        const cached = sessionStorage.portalStudent;
+        if (cached) student = JSON.parse(cached);
+      }
+    }
 
     function route() {
       return location.hash.replace("#", "") || (sessionStorage.portalLoggedIn ? "/student" : "/login");
@@ -932,12 +1052,13 @@
       return sessionStorage.portalLoggedIn === "1";
     }
 
-    function render() {
+    async function render() {
       const current = route();
       if (current === "/login" || !isLoggedIn()) {
         renderLogin();
         return;
       }
+      await loadPortalData();
       renderShell(current);
     }
 
@@ -945,21 +1066,21 @@
       document.getElementById("app").innerHTML = `
         <main class="login-page">
           <section class="login-brand" aria-label="HCMUTE">
-            <div class="brand-logo">HCM<br><small>UTE</small></div>
+            <img class="brand-logo-img" src="references/ute_logo.png" alt="HCMUTE">
             <h1>HCM-UTE</h1>
             <p>Trường Đại học Công nghệ Kỹ thuật TP.HCM</p>
           </section>
           <form class="login-card" id="loginForm">
             <h2>Đăng nhập</h2>
             <p class="subtitle">Cổng thông tin đào tạo</p>
-            <div class="login-error" id="loginError">Tài khoản demo: 22110001 / demo123</div>
+            <div class="login-error" id="loginError">Sai tài khoản hoặc mật khẩu. Mật khẩu mặc định dữ liệu demo: Sv@MSSV.</div>
             <div class="field">
               <label for="username">Tên đăng nhập</label>
               <input id="username" autocomplete="username" value="22110001">
             </div>
             <div class="field">
               <label for="password">Mật khẩu</label>
-              <input id="password" type="password" autocomplete="current-password" value="demo123">
+              <input id="password" type="password" autocomplete="current-password" value="Sv@22110001">
             </div>
             <button class="portal-button" type="submit">Đăng nhập</button>
             <button class="google-button" type="button"><span class="google-mark">G</span>Đăng nhập với Google Sinh viên</button>
@@ -969,14 +1090,28 @@
           <footer class="login-footer">All Rights Reserved Developed by PSC</footer>
         </main>
       `;
-      document.getElementById("loginForm").addEventListener("submit", (event) => {
+      document.getElementById("loginForm").addEventListener("submit", async (event) => {
         event.preventDefault();
         const username = document.getElementById("username").value.trim();
         const password = document.getElementById("password").value;
-        if (username === student.id && password === "demo123") {
+        try {
+          const payload = await api.post("/api/login", { username, password });
+          if (!payload.ok || !payload.student) throw new Error(payload.error || "LOGIN_FAILED");
+          student = mapApiStudent(payload.student);
           sessionStorage.portalLoggedIn = "1";
+          sessionStorage.portalStudentId = student.id;
+          sessionStorage.portalStudent = JSON.stringify(student);
           navigate("/student");
           return;
+        } catch (error) {
+          if (username === fallbackStudent.id && password === `Sv@${fallbackStudent.id}`) {
+            student = { ...fallbackStudent };
+            sessionStorage.portalLoggedIn = "1";
+            sessionStorage.portalStudentId = student.id;
+            sessionStorage.portalStudent = JSON.stringify(student);
+            navigate("/student");
+            return;
+          }
         }
         document.getElementById("loginError").style.display = "block";
       });
@@ -1018,8 +1153,7 @@
       return `
         <aside class="sidebar" id="sidebar">
           <a class="sidebar-logo" href="#/student" aria-label="Trang chủ sinh viên">
-            <div class="brand-logo">HCM<br><small>UTE</small></div>
-            <span>HCM-UTE</span>
+            <img class="brand-logo-img" src="references/ute_logo.png" alt="HCMUTE">
           </a>
           <div class="student-summary">
             <div class="avatar" role="img" aria-label="Ảnh sinh viên"></div>
@@ -1151,18 +1285,32 @@
     }
 
     function curriculumTable() {
-      const body = [
-        `<tr class="group-pink"><td colspan="8">Chưa phân học kỳ</td></tr>`,
-        `<tr class="group-blue"><td colspan="8">Bắt buộc</td></tr>`,
-        ...curriculumRows.filter(r => r.type === "Bắt buộc").map(courseRow),
-        `<tr class="group-blue"><td colspan="8">Tự chọn</td></tr>`,
-        ...curriculumRows.filter(r => r.type === "Tự chọn").map(courseRow)
-      ].join("");
+      const hasStructuredRows = curriculumRows.some(row => row.type && row.type !== "course");
+      const rows = hasStructuredRows
+        ? curriculumRows.map((row, index) => {
+            if (row.type === "group") return `<tr class="group-pink"><td colspan="12">${row.label}</td></tr>`;
+            if (row.type === "requirement") return `<tr class="group-blue"><td colspan="12">${row.label}</td></tr>`;
+            return courseRow(row, index);
+          })
+        : [
+            `<tr class="group-pink"><td colspan="12">Chưa phân học kỳ</td></tr>`,
+            `<tr class="group-blue"><td colspan="12">Bắt buộc</td></tr>`,
+            ...curriculumRows.filter(r => r.type === "Bắt buộc" || r.requirement === "Bắt buộc").map(courseRow),
+            `<tr class="group-blue"><td colspan="12">Tự chọn</td></tr>`,
+            ...curriculumRows.filter(r => r.type === "Tự chọn" || r.requirement === "Tự chọn").map(courseRow)
+          ];
+      const body = rows.join("");
       return `
         <div class="table-wrap">
           <table aria-label="Chương trình đào tạo">
             <thead>
-              <tr><th>STT</th><th>Mã học phần</th><th>Tên học phần</th><th>Nhóm</th><th>Số TC</th><th>Học kỳ</th><th>Học phần tiên quyết</th><th>Kết quả</th></tr>
+              <tr>
+                <th rowspan="2">STT</th><th rowspan="2">Mã học phần</th><th rowspan="2">Tên học phần</th>
+                <th rowspan="2">Nhóm tự chọn</th><th rowspan="2">Số TC</th><th colspan="2">Số tiết</th>
+                <th rowspan="2">Học phần tiên quyết</th><th rowspan="2">Học phần học trước</th>
+                <th rowspan="2">Học phần tương đương</th><th rowspan="2">Khoa/Bộ môn</th><th rowspan="2">Đề cương</th>
+              </tr>
+              <tr><th>LT</th><th>TH</th></tr>
             </thead>
             <tbody>${body}</tbody>
           </table>
@@ -1170,16 +1318,21 @@
     }
 
     function courseRow(row, index) {
+      const stt = row.index || index + 1;
       return `
         <tr data-term="${row.term}">
-          <td class="center">${index + 1}</td>
+          <td class="center">${stt}</td>
           <td class="center">${row.code}</td>
           <td>${row.name}</td>
-          <td class="center">${row.type}</td>
+          <td class="center">${row.electiveGroup || ""}</td>
           <td class="center">${row.credits}</td>
-          <td class="center">${row.term || "Chưa phân"}</td>
-          <td>${row.prereq || ""}</td>
-          <td class="center">${index < 3 ? '<span class="status-pass">✓ Đã đạt</span>' : ""}</td>
+          <td class="center">${row.lectureHours || ""}</td>
+          <td class="center">${row.practiceHours || ""}</td>
+          <td>${row.prerequisite || row.prereq || ""}</td>
+          <td>${row.prior || ""}</td>
+          <td>${row.equivalent || ""}</td>
+          <td>${row.department || "Công nghệ Thông tin"}</td>
+          <td class="center">${row.outline || ""}</td>
         </tr>`;
     }
 
@@ -1236,20 +1389,7 @@
           <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
         </div>
         ${curriculumTable()}
-        <p class="agent-hint">Nhấn biểu tượng trợ lý ở góc dưới bên phải để hỏi về các học phần có thể đăng ký.</p>
-        <section class="panel">
-          <div class="panel-header">Lớp học phần học kỳ hiện tại</div>
-          <div class="panel-body">
-            <div class="table-wrap">
-              <table aria-label="Lớp học phần">
-                <thead><tr><th>Mã LHP</th><th>Mã môn</th><th>Tên môn</th><th>Nhóm</th><th>TC</th><th>Trạng thái</th><th>Lịch học</th><th>Giảng viên</th></tr></thead>
-                <tbody>${offerings.map(row => `
-                  <tr><td class="center">${row.id}</td><td class="center">${row.code}</td><td>${row.name}</td><td class="center">${row.group}</td><td class="center">${row.credits}</td><td class="center">${row.status}</td><td>${row.schedule}</td><td>${row.teacher}</td></tr>
-                `).join("")}</tbody>
-              </table>
-            </div>
-          </div>
-        </section>`;
+        <p class="agent-hint">Nhấn biểu tượng trợ lý ở góc dưới bên phải để hỏi về các học phần có thể đăng ký.</p>`;
     }
 
     function renderAgent() {
