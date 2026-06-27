@@ -869,30 +869,34 @@
   <div id="app"></div>
 
   <script>
-    const fallbackStudent = {
-      id: "22110001",
-      name: "Hoàng Minh Mai",
+    const emptyStudent = {
+      id: "",
+      name: "Chưa tải dữ liệu",
       type: "SV/HV/NCS",
-      status: "Còn học",
-      major: "Công nghệ thông tin",
-      className: "CNTT K22",
-      program: "Chương trình đào tạo HCMUTE - Công nghệ thông tin",
-      course: "CNTT K22",
-      birthDate: "14/09/2004",
-      birthPlace: "TP. Hồ Chí Minh",
-      gender: "Nữ",
-      citizenId: "0772******01",
-      ethnicity: "Kinh",
-      religion: "Không",
-      phone: "09******01",
-      email: "22110001@student.hcmute.edu.vn",
-      address: "TP. Hồ Chí Minh",
-      gpa: "2.63",
-      credits: 170,
-      requiredCredits: 150,
-      currentCredits: 13
+      status: "Chưa cập nhật",
+      major: "Chưa cập nhật",
+      className: "Chưa cập nhật",
+      program: "Chưa cập nhật",
+      course: "Chưa cập nhật",
+      birthDate: "Chưa cập nhật",
+      birthPlace: "Chưa cập nhật",
+      gender: "Chưa cập nhật",
+      citizenId: "Chưa cập nhật",
+      ethnicity: "Chưa cập nhật",
+      religion: "Chưa cập nhật",
+      phone: "Chưa cập nhật",
+      email: "Chưa cập nhật",
+      address: "Chưa cập nhật",
+      emergencyContact: "Chưa cập nhật",
+      imageUrl: "",
+      gpa: "Chưa cập nhật",
+      credits: 0,
+      requiredCredits: 0,
+      currentCredits: 0,
+      warning: "",
+      note: ""
     };
-    let student = { ...fallbackStudent };
+    let student = { ...emptyStudent };
 
     let notifications = [
       { title: "Thông báo lịch đăng ký học phần học kỳ 2 năm 2026", sender: "Phòng Đào tạo", time: "20/06/2026 08:00" },
@@ -948,17 +952,17 @@
     };
 
     function mapApiStudent(row) {
-      if (!row) return { ...fallbackStudent };
+      if (!row) return { ...emptyStudent };
       return {
-        id: row.MaSV || fallbackStudent.id,
-        name: row.HoTen || fallbackStudent.name,
+        id: row.MaSV || emptyStudent.id,
+        name: row.HoTen || emptyStudent.name,
         type: row.LoaiNguoiHoc || "SV/HV/NCS",
-        status: row.TrangThaiHienThi || row.TrangThaiSV || fallbackStudent.status,
-        major: row.TenNganh || fallbackStudent.major,
-        className: row.MaKhoaHoc || fallbackStudent.className,
-        program: row.TenCTDT || fallbackStudent.program,
+        status: row.TrangThaiHienThi || row.TrangThaiSV || emptyStudent.status,
+        major: row.TenNganh || emptyStudent.major,
+        className: row.LopQuanLy || row.MaKhoaHoc || emptyStudent.className,
+        program: row.TenCTDT || emptyStudent.program,
         programCode: row.MaCTDT || "",
-        course: row.TenKhoaHoc || row.MaKhoaHoc || fallbackStudent.course,
+        course: row.TenKhoaHoc || row.MaKhoaHoc || emptyStudent.course,
         birthDate: row.NgaySinh || "Chưa cập nhật",
         birthPlace: row.NoiSinh || "Chưa cập nhật",
         gender: row.GioiTinh || "Chưa cập nhật",
@@ -966,16 +970,24 @@
         ethnicity: row.DanToc || "Chưa cập nhật",
         religion: row.TonGiao || "Chưa cập nhật",
         phone: row.SoDienThoai || "Chưa cập nhật",
-        email: row.Email || fallbackStudent.email,
+        email: row.Email || emptyStudent.email,
         address: row.DiaChi || "Chưa cập nhật",
         imageUrl: row.ImageUrl || "",
-        gpa: row.GPA ?? fallbackStudent.gpa,
-        credits: row.TinChiTichLuy ?? fallbackStudent.credits,
-        requiredCredits: row.TongTinChiToiThieu ?? fallbackStudent.requiredCredits,
-        currentCredits: row.TinChiDangKyHienTai ?? fallbackStudent.currentCredits,
+        emergencyContact: formatEmergencyContact(row.LienHe),
+        gpa: row.GPA ?? emptyStudent.gpa,
+        credits: row.TinChiTichLuy ?? emptyStudent.credits,
+        requiredCredits: row.TongTinChiToiThieu ?? emptyStudent.requiredCredits,
+        currentCredits: row.TinChiDangKyHienTai ?? emptyStudent.currentCredits,
         warning: row.CanhBaoHocVu || "",
         note: row.GhiChu || ""
       };
+    }
+
+    function formatEmergencyContact(contacts) {
+      if (!Array.isArray(contacts) || contacts.length === 0) return emptyStudent.emergencyContact;
+      const contact = contacts.find(item => item.LaLienHeKhanCap) || contacts[0];
+      const phone = contact.SoDienThoai || "Chưa cập nhật";
+      return `${contact.HoTen || "Liên hệ"} - ${phone}`;
     }
 
     function mapApiCurriculum(items) {
@@ -1073,14 +1085,14 @@
           <form class="login-card" id="loginForm">
             <h2>Đăng nhập</h2>
             <p class="subtitle">Cổng thông tin đào tạo</p>
-            <div class="login-error" id="loginError">Sai tài khoản hoặc mật khẩu. Mật khẩu mặc định dữ liệu demo: Sv@MSSV.</div>
+            <div class="login-error" id="loginError">Sai tài khoản hoặc mật khẩu.</div>
             <div class="field">
               <label for="username">Tên đăng nhập</label>
-              <input id="username" autocomplete="username" value="22110001">
+              <input id="username" autocomplete="username" placeholder="Nhập mã số sinh viên">
             </div>
             <div class="field">
               <label for="password">Mật khẩu</label>
-              <input id="password" type="password" autocomplete="current-password" value="Sv@22110001">
+              <input id="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu">
             </div>
             <button class="portal-button" type="submit">Đăng nhập</button>
             <button class="google-button" type="button"><span class="google-mark">G</span>Đăng nhập với Google Sinh viên</button>
@@ -1103,16 +1115,7 @@
           sessionStorage.portalStudent = JSON.stringify(student);
           navigate("/student");
           return;
-        } catch (error) {
-          if (username === fallbackStudent.id && password === `Sv@${fallbackStudent.id}`) {
-            student = { ...fallbackStudent };
-            sessionStorage.portalLoggedIn = "1";
-            sessionStorage.portalStudentId = student.id;
-            sessionStorage.portalStudent = JSON.stringify(student);
-            navigate("/student");
-            return;
-          }
-        }
+        } catch (error) {}
         document.getElementById("loginError").style.display = "block";
       });
     }
@@ -1259,7 +1262,7 @@
             ${infoRow("Email", student.email)}
             ${infoRow("Điện thoại", student.phone)}
             ${infoRow("Địa chỉ", student.address)}
-            ${infoRow("Liên hệ khẩn cấp", "Nguyễn Văn A - 09******88")}
+            ${infoRow("Liên hệ khẩn cấp", student.emergencyContact)}
           </div>
           <div class="panel info-panel">
             <div class="panel-header">Thông tin nhập học</div>

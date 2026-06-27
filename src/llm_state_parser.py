@@ -5,15 +5,22 @@ import os
 import re
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-SYSTEM_PROMPT = (
-    "Ban la bo phan tich state cho bai toan Vietnamese multi-turn text-to-SQL "
-    "trong he thong dang ky mon hoc. Chi tra JSON hop le gom intent, edit_operation, slots."
+from .course_glossary import (
+    build_system_prompt,
+    course_code_aliases_for_validation,
+    normalize_form,
+    prompt_metadata,
 )
+
+
+SYSTEM_PROMPT = build_system_prompt()
+PROMPT_METADATA = prompt_metadata()
 
 ALLOWED_INTENTS = {
     "COURSE_OFFERING_SEARCH",
@@ -194,15 +201,7 @@ ALLOWED_SLOTS = {
 INT_SLOTS = {"HocKy", "NamHoc", "Thu", "TietBD", "TietKT", "CoTheDangKy", "Limit"}
 UPPER_SLOTS = {"MaSV", "MaMH", "MaLHP", "MaNganh", "Nhom", "Buoi", "TrangThaiLHP", "LoaiYC", "KetQua", "PrereqDirection", "SortBy", "SortDirection", "MaPhong", "DayNha"}
 
-MODEL_COURSE_CODE_ALIASES = {
-    "CSDL": "DBSY230184E",
-    "CSCL": "DBSY230184E",
-    "CT430101E": "DBSY230184E",
-    "DBSY": "DBSY230184E",
-    "AI": "ARIN330585E",
-    "AI580101E": "ARIN330585E",
-    "ARIN": "ARIN330585E",
-}
+MODEL_COURSE_CODE_ALIASES = course_code_aliases_for_validation()
 
 SLOT_VALUE_ALIASES = {
     ("Buoi", "MORNING"): "SANG",
@@ -363,7 +362,7 @@ def validate_state(obj: Dict[str, Any]) -> ParsedState:
             token = value.strip().upper()
             value = SLOT_VALUE_ALIASES.get((key, token), value)
             if key == "MaMH":
-                value = MODEL_COURSE_CODE_ALIASES.get(token, value)
+                value = MODEL_COURSE_CODE_ALIASES.get(token, MODEL_COURSE_CODE_ALIASES.get(normalize_form(value), value))
         if key in INT_SLOTS:
             try:
                 clean_slots[key] = int(value)
@@ -436,9 +435,13 @@ class QwenStateParser:
             raise StateParserError(f"Adapter path does not exist: {self.adapter_path}")
         self.base_model = base_model or self._read_base_model()
         self.max_new_tokens = max_new_tokens
+        self.system_prompt = build_system_prompt()
+        self.prompt_metadata = prompt_metadata()
+        self.prompt_manifest_warning: Optional[str] = None
         self._tokenizer = None
         self._model = None
         self._torch = None
+        self._check_prompt_manifest()
         if os.getenv("NL2SQL_SKIP_QWEN_PREFLIGHT") != "1":
             self._preflight_runtime()
 
@@ -450,6 +453,34 @@ class QwenStateParser:
             if base:
                 return str(base)
         return "Qwen/Qwen2.5-Coder-3B-Instruct"
+
+    def _check_prompt_manifest(self) -> None:
+        manifest_path = self.adapter_path / "prompt_manifest.json"
+        if not manifest_path.exists():
+            self.prompt_manifest_warning = (
+                f"Adapter {self.adapter_path} has no prompt_manifest.json; prompt compatibility is unverified."
+            )
+            warnings.warn(self.prompt_manifest_warning, RuntimeWarning, stacklevel=2)
+            return
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        trained_hash = manifest.get("trained_prompt_sha256") or manifest.get("prompt_sha256")
+        current_hash = self.prompt_metadata["prompt_sha256"]
+        if not trained_hash:
+            self.prompt_manifest_warning = (
+                f"Adapter {self.adapter_path} prompt manifest does not declare trained_prompt_sha256."
+            )
+            warnings.warn(self.prompt_manifest_warning, RuntimeWarning, stacklevel=2)
+            return
+        if trained_hash != current_hash:
+            message = (
+                "Prompt hash mismatch for adapter "
+                f"{self.adapter_path}: trained={trained_hash}, current={current_hash}."
+            )
+            if os.getenv("NL2SQL_ALLOW_PROMPT_HASH_MISMATCH") == "1":
+                self.prompt_manifest_warning = message
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
+                return
+            raise StateParserError(message)
 
     def _preflight_runtime(self) -> None:
         try:
@@ -530,7 +561,7 @@ class QwenStateParser:
             "utterance": utterance,
         }
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, sort_keys=True)},
         ]
         prompt = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -558,6 +589,8 @@ class RemoteStateParser:
     def __init__(self, api_url: str, timeout_seconds: float = 60.0) -> None:
         self.api_url = api_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.system_prompt = build_system_prompt()
+        self.prompt_metadata = prompt_metadata()
         if not self.api_url:
             raise StateParserError("Remote Qwen API URL is empty")
 
@@ -566,6 +599,8 @@ class RemoteStateParser:
             "question": utterance,
             "utterance": utterance,
             "previous_state": compact_previous_state(previous_state),
+            "system_prompt": self.system_prompt,
+            "prompt_metadata": self.prompt_metadata,
         }
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(

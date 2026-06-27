@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "data" / "processed"
-SYSTEM_PROMPT = (
+DIRECT_SQL_SYSTEM_PROMPT = (
     "You are a Text-to-SQL assistant for a Vietnamese university course registration database. "
     "Generate only one valid SQLite SELECT query. Do not explain."
 )
@@ -96,12 +96,12 @@ def make_row(row, split, default_schema):
     user = USER_TEMPLATE.format(schema=schema, history=history, question=question)
     gold_sql = row.get("output", "").strip()
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": DIRECT_SQL_SYSTEM_PROMPT},
         {"role": "user", "content": user},
         {"role": "assistant", "content": gold_sql},
     ]
     text = (
-        f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
+        f"<|im_start|>system\n{DIRECT_SQL_SYSTEM_PROMPT}<|im_end|>\n"
         f"<|im_start|>user\n{user}<|im_end|>\n"
         f"<|im_start|>assistant\n{gold_sql}<|im_end|>"
     )
@@ -147,11 +147,11 @@ def rows_from_conversations(path, conversations, split, default_schema):
                     "id": f"{conv.get('conversation_id', path.stem)}_turn_{turn.get('turn_id', idx + 1)}",
                     "split": split,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": DIRECT_SQL_SYSTEM_PROMPT},
                         {"role": "user", "content": user},
                         {"role": "assistant", "content": sql},
                     ],
-                    "text": f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n{sql}<|im_end|>",
+                    "text": f"<|im_start|>system\n{DIRECT_SQL_SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n{sql}<|im_end|>",
                     "gold_sql": sql,
                     "metadata": {
                         "conversation_id": conv.get("conversation_id"),

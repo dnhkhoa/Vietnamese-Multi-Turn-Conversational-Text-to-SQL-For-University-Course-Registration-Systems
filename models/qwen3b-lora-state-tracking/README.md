@@ -19,6 +19,18 @@ tags:
 
 ## Model Details
 
+### Prompt Compatibility
+
+This adapter is currently marked as `legacy_prompt_unverified` in `prompt_manifest.json`.
+The runtime state-parser prompt now uses:
+
+- prompt_version: `state-json-v2-k23-glossary`
+- prompt_sha256: `dad2c9b95459c890e53a53550c7fa6f4c729d688af27736e4e64772273a2b9a6`
+- glossary_version: `k23-glossary-v1`
+- glossary_sha256: `d32ff7da5431c6fec860383671c7c29e86d0c31e3ac4572b22ad3dc1eccba121`
+
+This adapter must not be reported as passing the course-glossary evaluation until it is evaluated with real Qwen/LoRA inference. After retraining with the prompt above, update `trained_prompt_version` and `trained_prompt_sha256` in `prompt_manifest.json`.
+
 ### Model Description
 
 <!-- Provide a longer summary of what this model is. -->

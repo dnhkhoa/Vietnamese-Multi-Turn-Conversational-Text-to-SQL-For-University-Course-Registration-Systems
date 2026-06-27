@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sqlite3
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
@@ -20,6 +22,154 @@ TARGET_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 15
 MAX_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 18
 REALISTIC_TOTAL_CREDITS_TO_GRADUATE = 150
 NEAR_GRADUATION_CREDIT_RATIO = 0.85
+CTDT_ID = "CTDT_HCMUTE_CNTT"
+
+
+# Official semester placement from data/9.-INFORMATION-TECHNOLOGY_K23-1-1.pdf,
+# pages 2-5. PHED130713E in the PDF is represented by PHED130715E in the
+# source workbook/database (same Physical Education 3 course title).
+PDF_K23_SEMESTERS = {
+    "LLCT130105E": 1,
+    "MATH132401E": 1,
+    "ACEN340535E": 1,
+    "ACEN340635E": 1,
+    "INIT130185E": 1,
+    "INPR130285E": 1,
+    "PHED110513E": 1,
+    "LLCT120205E": 2,
+    "MATH132501E": 2,
+    "MATH143001E": 2,
+    "ACEN440735E": 2,
+    "ACEN440835E": 2,
+    "PRTE230385E": 2,
+    "PHYS130902E": 2,
+    "PHED110613E": 2,
+    "LLCT120405E": 3,
+    "DIGR230485E": 3,
+    "DASA230179E": 3,
+    "OOPR230279E": 3,
+    "EEEN231780E": 3,
+    "DBSY230184E": 3,
+    "PHYS111202E": 3,
+    "PHED130715E": 3,
+    "DBMS330284E": 4,
+    "WIPR230579E": 4,
+    "OPSY330280E": 4,
+    "CAAL230180E": 4,
+    "NEES330380E": 4,
+    "PRBE214262E": 4,
+    "MATH132901E": 4,
+    "LLCT120314E": 4,
+    "GELA220405E": 5,
+    "WEPR330479E": 5,
+    "ARIN330585E": 5,
+    "INSE330380E": 5,
+    "PROJ215879E": 5,
+    "LLCT230214E": 5,
+    "IEPR550935E": 5,
+    "OOSE330679E": 6,
+    "DEPA330879E": 6,
+    "MOPR331279E": 6,
+    "NPRO430980E": 6,
+    "ADNT330580E": 6,
+    "ETHA332080E": 6,
+    "ISAD330384E": 6,
+    "BDES333877E": 6,
+    "DAMI330484E": 6,
+    "ENTW611038E": 6,
+    "ITEN420885E": 7,
+    "ITIN441085E": 7,
+    "SOTE431079E": 7,
+    "MTSE431179E": 7,
+    "POSE431479E": 7,
+    "CNDE430780E": 7,
+    "NSEC430880E": 7,
+    "POCN431280E": 7,
+    "BDAN333977E": 7,
+    "DBSE431284E": 7,
+    "POIS431184E": 7,
+    "GRPR471979E": 8,
+}
+
+
+# Strict prerequisites printed in the main curriculum grid (pages 4-5).
+PDF_K23_GRID_PREREQUISITES = {
+    "MOPR331279E": ("DBSY230184E",),
+    "NPRO430980E": ("INSE330380E", "DASA230179E"),
+    "ADNT330580E": ("NEES330380E",),
+    "ETHA332080E": ("NEES330380E", "INSE330380E"),
+    "SOTE431079E": ("OOSE330679E", "DBSY230184E"),
+    "MTSE431179E": ("WEPR330479E", "OOSE330679E"),
+    "CNDE430780E": ("NEES330380E", "ADNT330580E"),
+    "NSEC430880E": ("NEES330380E", "INSE330380E"),
+}
+
+
+# Unambiguous prerequisites from course descriptions (pages 7-22). None is
+# an explicit "Prerequisites: None" and therefore removes synthetic rules.
+PDF_K23_DESCRIPTION_PREREQUISITES = {
+    "INIT130185E": None,
+    "INPR130285E": None,
+    "PRTE230385E": None,
+    "DIGR230485E": None,
+    "ARIN330585E": None,
+    "DASA230179E": ("INPR130285E", "PRTE230385E"),
+    "OOPR230279E": ("INPR130285E",),
+    "INSE330380E": None,
+    "WEPR330479E": ("INPR130285E",),
+    "WIPR230579E": ("INPR130285E", "OOPR230279E", "DBMS330284E"),
+    "OOSD330879E": ("OOPR230279E",),
+    "SOTE431079E": ("SOEN330679E",),
+    "MTSE431179E": ("WEPR330479E",),
+    "MOPR331279E": ("WEPR330479E",),
+    "SOPM431679E": None,
+    "ADMP431879E": ("MOPR331279E",),
+    "DBMS330284E": ("DBSY230184E",),
+    "DAWH430784E": ("DBSY230184E",),
+    "INRE431084E": None,
+    "DAMI330484E": None,
+    "ISAD330384E": None,
+    "DBSE431284E": ("DBSY230184E", "INSE330380E"),
+    "CAAL230180E": None,
+    "OPSY330280E": ("CAAL230180E",),
+    "NEES330380E": None,
+    "DCTE330480E": ("NEES330380E",),
+    "ADNT330580E": ("NEES330380E",),
+    "UNOS330680E": ("NEES330380E",),
+    "CNDE430780E": ("NEES330380E", "ADNT330580E"),
+    "NSEC430880E": ("NEES330380E", "INSE330380E"),
+    "NPRO430980E": ("NEES330380E", "INPR130285E"),
+    "ESYS431080E": ("CAAL230180E",),
+    "NSMS432280E": ("NEES330380E", "ADNT330580E"),
+    "WISE432380E": ("NEES330380E",),
+}
+
+
+CANONICAL_COURSE_ALIASES = {
+    "INPR130285E": ("nhap mon lap trinh", ["nmlt", "nm l.trinh", "nm lap trinh", "nhập môn lập trình", "lap trinh co ban"]),
+    "PRTE230385E": ("ky thuat lap trinh", ["ktlt", "kỹ thuật lập trình"]),
+    "DASA230179E": ("cau truc du lieu va giai thuat", ["ctdlgt", "ctdl gt", "dsa", "cấu trúc dữ liệu và giải thuật"]),
+    "OOPR230279E": ("lap trinh huong doi tuong", ["lthdt", "oop", "lập trình hướng đối tượng"]),
+    "DBSY230184E": ("co so du lieu", ["csdl", "c sở d liệu", "c so d lieu", "cơ sở dữ liệu", "database"]),
+    "DBMS330284E": ("quan tri co so du lieu", ["qtcsdl", "quan tri csdl", "quản trị cơ sở dữ liệu"]),
+    "MATH143001E": ("dai so tuyen tinh", ["đsố", "dso", "dai so", "đại số", "đại số tuyến tính"]),
+    "DIGR230485E": ("toan roi rac", ["trr", "toán rời rạc"]),
+    "WEPR330479E": ("lap trinh web", ["lt web", "web programming", "lập trình web"]),
+    "ARIN330585E": ("tri tue nhan tao", ["ttnt", "artificial intelligence", "trí tuệ nhân tạo"]),
+    "NEES330380E": ("mang may tinh", ["mmt", "networking essentials", "mạng máy tính"]),
+}
+
+
+PDF_K23_NEW_ELECTIVES = {
+    "OOSD330879E": "Object-Oriented Software Design",
+    "DLEA432085E": "Deep Learning",
+}
+
+
+PDF_K23_EQUIVALENT_CODES = {
+    "PHED130713E": "PHED130715E",
+    "WESE431479E": "WESE331479E",
+}
 
 
 PROFILE_NOTES = {
@@ -189,6 +339,640 @@ def sync_current_registration_config(conn: sqlite3.Connection) -> tuple[int, int
         rows,
     )
     return int(semester["NamHoc"]), int(semester["HocKy"])
+
+
+def has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    return any(row["name"] == column_name for row in conn.execute(f"PRAGMA table_info({table_name})"))
+
+
+def add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    if not has_column(conn, table_name, column_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def normalize_alias(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value.replace("đ", "d").replace("Đ", "D"))
+    without_accents = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    cleaned = re.sub(r"[^a-z0-9_\-\s]", " ", without_accents.lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def ensure_pdf_catalog_courses(conn: sqlite3.Connection) -> int:
+    inserted = 0
+    for ma_mh, title in PDF_K23_NEW_ELECTIVES.items():
+        cur = conn.execute(
+            """
+            INSERT OR IGNORE INTO MonHoc
+                (MaMH, TenMH, SoTC, SoTietLT, SoTietTH, MaKhoaBM,
+                 HocPhanTienQuyetText, HocPhanHocTruocText,
+                 HocPhanTuongDuongText, LaMonDieuKien)
+            VALUES (?, ?, 3, 2, 1, 'CONG_NGHE_THONG_TIN', NULL, NULL, NULL, 0)
+            """,
+            (ma_mh, title),
+        )
+        inserted += cur.rowcount
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO CTDT_MonHoc
+                (MaCTDT, MaMH, LoaiYC, HKGoiY, MaNhomTC, TenNhomTC, STTTrongCTDT, ExcelRow)
+            SELECT ?, ?, 'TU_CHON', NULL, 'NHOM04', TenNhom, NULL, NULL
+            FROM CTDT_NhomTuChon
+            WHERE MaCTDT = ? AND MaNhomTC = 'NHOM04'
+            """,
+            (CTDT_ID, ma_mh, CTDT_ID),
+        )
+    return inserted
+
+
+def rebuild_curriculum_relationships(conn: sqlite3.Connection) -> dict[str, int]:
+    existing: dict[tuple[str, str, str], tuple[str, str, int | None]] = {}
+    if conn.execute("SELECT type FROM sqlite_master WHERE name = 'QuanHeHocPhan'").fetchone():
+        for row in conn.execute(
+            "SELECT MaMH, MaMHDieuKien, LoaiQuanHe, GhiChu FROM QuanHeHocPhan"
+        ):
+            existing[(row["MaMH"], row["MaMHDieuKien"], row["LoaiQuanHe"])] = (
+                row["GhiChu"] or "Quan hệ học phần synthetic kế thừa từ CTĐT V1.",
+                "SYNTHETIC_V1",
+                None,
+            )
+    if conn.execute("SELECT type FROM sqlite_master WHERE name = 'TienQuyet'").fetchone():
+        for row in conn.execute("SELECT MaMH, MaMHTQ FROM TienQuyet"):
+            existing.setdefault(
+                (row["MaMH"], row["MaMHTQ"], "TIEN_QUYET"),
+                ("Tiên quyết synthetic kế thừa từ bảng TienQuyet.", "SYNTHETIC_V1", None),
+            )
+
+    conn.execute("DROP VIEW IF EXISTS v_dieu_kien_dang_ky_mon_sv")
+    conn.execute("DROP VIEW IF EXISTS v_tien_quyet_day_du")
+    conn.execute("DROP TABLE IF EXISTS TienQuyet")
+    conn.execute("DROP TABLE IF EXISTS QuanHeHocPhan")
+    conn.execute("DROP TABLE IF EXISTS CTDT_QuanHeHocPhan")
+    conn.execute(
+        """
+        CREATE TABLE CTDT_QuanHeHocPhan (
+            MaCTDT TEXT NOT NULL,
+            MaMH TEXT NOT NULL,
+            MaMHDieuKien TEXT NOT NULL,
+            LoaiQuanHe TEXT NOT NULL
+                CHECK (LoaiQuanHe IN ('TIEN_QUYET', 'HOC_TRUOC', 'TUONG_DUONG')),
+            Nguon TEXT NOT NULL,
+            TrangPDF INTEGER,
+            GhiChu TEXT,
+            PRIMARY KEY (MaCTDT, MaMH, MaMHDieuKien, LoaiQuanHe),
+            FOREIGN KEY (MaCTDT) REFERENCES CTDT(MaCTDT),
+            FOREIGN KEY (MaMH) REFERENCES MonHoc(MaMH),
+            FOREIGN KEY (MaMHDieuKien) REFERENCES MonHoc(MaMH),
+            CHECK (MaMH <> MaMHDieuKien)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_ctdt_quanhe_mamh ON CTDT_QuanHeHocPhan(MaCTDT, MaMH)")
+    conn.execute("CREATE INDEX idx_ctdt_quanhe_dieukien ON CTDT_QuanHeHocPhan(MaCTDT, MaMHDieuKien)")
+
+    valid_courses = {row[0] for row in conn.execute("SELECT MaMH FROM MonHoc")}
+    for (ma_mh, condition, relation_type), (note, source, page) in existing.items():
+        if ma_mh not in valid_courses or condition not in valid_courses or ma_mh == condition:
+            continue
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO CTDT_QuanHeHocPhan
+                (MaCTDT, MaMH, MaMHDieuKien, LoaiQuanHe, Nguon, TrangPDF, GhiChu)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (CTDT_ID, ma_mh, condition, relation_type, source, page, note),
+        )
+
+    override_courses = set(PDF_K23_DESCRIPTION_PREREQUISITES) | set(PDF_K23_GRID_PREREQUISITES)
+    conn.executemany(
+        "DELETE FROM CTDT_QuanHeHocPhan WHERE MaCTDT = ? AND MaMH = ? AND LoaiQuanHe = 'TIEN_QUYET'",
+        [(CTDT_ID, ma_mh) for ma_mh in sorted(override_courses)],
+    )
+
+    strict_count = 0
+    soft_count = 0
+    for ma_mh in sorted(override_courses):
+        strict_prereqs = PDF_K23_GRID_PREREQUISITES.get(ma_mh)
+        if strict_prereqs is None:
+            strict_prereqs = PDF_K23_DESCRIPTION_PREREQUISITES.get(ma_mh)
+            source = "PDF_K23_COURSE_DESCRIPTION"
+            page = None
+        else:
+            source = "PDF_K23_CURRICULUM_GRID"
+            page = 4 if ma_mh in {"MOPR331279E", "NPRO430980E", "ADNT330580E", "ETHA332080E", "SOTE431079E", "MTSE431179E"} else 5
+        for condition in strict_prereqs or ():
+            if ma_mh not in valid_courses or condition not in valid_courses:
+                raise RuntimeError(f"Unknown PDF prerequisite mapping: {ma_mh} <- {condition}")
+            relation_type = "TIEN_QUYET"
+            target_semester = PDF_K23_SEMESTERS.get(ma_mh)
+            condition_semester = PDF_K23_SEMESTERS.get(condition)
+            if (
+                source == "PDF_K23_COURSE_DESCRIPTION"
+                and target_semester is not None
+                and condition_semester is not None
+                and condition_semester >= target_semester
+            ):
+                relation_type = "HOC_TRUOC"
+            conn.execute(
+                """
+                INSERT INTO CTDT_QuanHeHocPhan
+                    (MaCTDT, MaMH, MaMHDieuKien, LoaiQuanHe, Nguon, TrangPDF, GhiChu)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    CTDT_ID,
+                    ma_mh,
+                    condition,
+                    relation_type,
+                    source,
+                    page,
+                    "Điều kiện cùng học kỳ được lưu như học trước mềm."
+                    if relation_type == "HOC_TRUOC"
+                    else "Đối chiếu CTĐT CNTT K23.",
+                ),
+            )
+            if relation_type == "TIEN_QUYET":
+                strict_count += 1
+            else:
+                soft_count += 1
+
+        description_prereqs = PDF_K23_DESCRIPTION_PREREQUISITES.get(ma_mh)
+        if ma_mh in PDF_K23_GRID_PREREQUISITES and description_prereqs:
+            for condition in description_prereqs:
+                if condition in PDF_K23_GRID_PREREQUISITES[ma_mh]:
+                    continue
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO CTDT_QuanHeHocPhan
+                        (MaCTDT, MaMH, MaMHDieuKien, LoaiQuanHe, Nguon, TrangPDF, GhiChu)
+                    VALUES (?, ?, ?, 'HOC_TRUOC', 'PDF_K23_COURSE_DESCRIPTION', NULL, ?)
+                    """,
+                    (CTDT_ID, ma_mh, condition, "Mô tả môn học khác bảng curriculum; lưu như học trước mềm."),
+                )
+                soft_count += 1
+
+    conn.executescript(
+        """
+        CREATE VIEW QuanHeHocPhan AS
+        SELECT DISTINCT MaMH, MaMHDieuKien, LoaiQuanHe, GhiChu
+        FROM CTDT_QuanHeHocPhan;
+
+        CREATE VIEW TienQuyet AS
+        SELECT DISTINCT MaMH, MaMHDieuKien AS MaMHTQ
+        FROM CTDT_QuanHeHocPhan
+        WHERE LoaiQuanHe = 'TIEN_QUYET';
+
+        CREATE VIEW v_tien_quyet_day_du AS
+        SELECT
+            tq.MaMH,
+            mh.TenMH,
+            mh.SoTC,
+            tq.MaMHTQ,
+            mh_tq.TenMH AS TenMHTQ,
+            mh_tq.SoTC AS SoTCTQ
+        FROM TienQuyet tq
+        JOIN MonHoc mh ON tq.MaMH = mh.MaMH
+        JOIN MonHoc mh_tq ON tq.MaMHTQ = mh_tq.MaMH;
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE MonHoc
+        SET HocPhanTienQuyetText = (
+                SELECT group_concat(qh.MaMHDieuKien || ' - ' || req.TenMH, '; ')
+                FROM CTDT_QuanHeHocPhan qh
+                JOIN MonHoc req ON req.MaMH = qh.MaMHDieuKien
+                WHERE qh.MaMH = MonHoc.MaMH AND qh.LoaiQuanHe = 'TIEN_QUYET'
+            ),
+            HocPhanHocTruocText = (
+                SELECT group_concat(qh.MaMHDieuKien || ' - ' || req.TenMH, '; ')
+                FROM CTDT_QuanHeHocPhan qh
+                JOIN MonHoc req ON req.MaMH = qh.MaMHDieuKien
+                WHERE qh.MaMH = MonHoc.MaMH AND qh.LoaiQuanHe = 'HOC_TRUOC'
+            )
+        """
+    )
+    return {"strict_pdf": strict_count, "soft_pdf": soft_count, "total": conn.execute("SELECT COUNT(*) FROM CTDT_QuanHeHocPhan").fetchone()[0]}
+
+
+def apply_k23_semester_plan(conn: sqlite3.Connection) -> dict[str, int]:
+    valid_courses = {row[0] for row in conn.execute("SELECT MaMH FROM MonHoc")}
+    missing = sorted(set(PDF_K23_SEMESTERS) - valid_courses)
+    if missing:
+        raise RuntimeError(f"PDF K23 semester courses missing from MonHoc: {missing}")
+    changed = 0
+    for ma_mh, semester in PDF_K23_SEMESTERS.items():
+        cur = conn.execute(
+            "UPDATE CTDT_MonHoc SET HKGoiY = ? WHERE MaCTDT = ? AND MaMH = ? AND HKGoiY IS NOT ?",
+            (semester, CTDT_ID, ma_mh, semester),
+        )
+        changed += cur.rowcount
+
+    group_ranges = {
+        "NHOM01": (3, 3),
+        "NHOM02": (2, 3),
+        "NHOM03": (5, 6),
+        "NHOM04": (6, 8),
+        "NHOM05": (1, 1),
+    }
+    inferred = 0
+    for row in conn.execute(
+        """
+        SELECT MaMH, HKGoiY, MaNhomTC
+        FROM CTDT_MonHoc
+        WHERE MaCTDT = ? AND MaNhomTC IN ('NHOM01', 'NHOM02', 'NHOM03', 'NHOM04', 'NHOM05')
+        ORDER BY MaNhomTC, MaMH
+        """,
+        (CTDT_ID,),
+    ).fetchall():
+        if row["MaMH"] in PDF_K23_SEMESTERS:
+            continue
+        lower, upper = group_ranges[row["MaNhomTC"]]
+        current = row["HKGoiY"]
+        if current is not None and lower <= int(current) <= upper:
+            continue
+        prereq_row = conn.execute(
+            """
+            SELECT MAX(cm.HKGoiY)
+            FROM CTDT_QuanHeHocPhan qh
+            JOIN CTDT_MonHoc cm
+              ON cm.MaCTDT = qh.MaCTDT AND cm.MaMH = qh.MaMHDieuKien
+            WHERE qh.MaCTDT = ? AND qh.MaMH = ? AND qh.LoaiQuanHe = 'TIEN_QUYET'
+            """,
+            (CTDT_ID, row["MaMH"]),
+        ).fetchone()[0]
+        suggested = max(lower, int(prereq_row) + 1 if prereq_row is not None else lower)
+        level_match = re.match(r"^[A-Z]+(\d)", row["MaMH"])
+        if row["MaNhomTC"] == "NHOM04" and level_match and int(level_match.group(1)) >= 4:
+            suggested = max(suggested, 7)
+        suggested = min(suggested, upper)
+        conn.execute(
+            "UPDATE CTDT_MonHoc SET HKGoiY = ? WHERE MaCTDT = ? AND MaMH = ?",
+            (suggested, CTDT_ID, row["MaMH"]),
+        )
+        inferred += 1
+
+    group_semesters = {"NHOM01": 3, "NHOM02": 2, "NHOM03": 5, "NHOM04": 7, "NHOM05": 1}
+    conn.executemany(
+        "UPDATE CTDT_NhomTuChon SET HocKyGoiY = ? WHERE MaCTDT = ? AND MaNhomTC = ?",
+        [(semester, CTDT_ID, group) for group, semester in group_semesters.items()],
+    )
+    return {"official_changed": changed, "elective_inferred": inferred}
+
+
+def soften_noncausal_description_prerequisites(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT qh.MaCTDT, qh.MaMH, qh.MaMHDieuKien
+        FROM CTDT_QuanHeHocPhan qh
+        JOIN CTDT_MonHoc target
+          ON target.MaCTDT = qh.MaCTDT AND target.MaMH = qh.MaMH
+        JOIN CTDT_MonHoc required
+          ON required.MaCTDT = qh.MaCTDT AND required.MaMH = qh.MaMHDieuKien
+        WHERE qh.LoaiQuanHe = 'TIEN_QUYET'
+          AND qh.Nguon = 'PDF_K23_COURSE_DESCRIPTION'
+          AND required.HKGoiY >= target.HKGoiY
+        """
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            """
+            UPDATE CTDT_QuanHeHocPhan
+            SET LoaiQuanHe = 'HOC_TRUOC',
+                GhiChu = 'Mô tả PDF nêu điều kiện cùng/sau học kỳ; lưu như học trước mềm.'
+            WHERE MaCTDT = ? AND MaMH = ? AND MaMHDieuKien = ? AND LoaiQuanHe = 'TIEN_QUYET'
+            """,
+            (row["MaCTDT"], row["MaMH"], row["MaMHDieuKien"]),
+        )
+    if rows:
+        conn.execute(
+            """
+            UPDATE MonHoc
+            SET HocPhanTienQuyetText = (
+                    SELECT group_concat(qh.MaMHDieuKien || ' - ' || req.TenMH, '; ')
+                    FROM CTDT_QuanHeHocPhan qh
+                    JOIN MonHoc req ON req.MaMH = qh.MaMHDieuKien
+                    WHERE qh.MaMH = MonHoc.MaMH AND qh.LoaiQuanHe = 'TIEN_QUYET'
+                ),
+                HocPhanHocTruocText = (
+                    SELECT group_concat(qh.MaMHDieuKien || ' - ' || req.TenMH, '; ')
+                    FROM CTDT_QuanHeHocPhan qh
+                    JOIN MonHoc req ON req.MaMH = qh.MaMHDieuKien
+                    WHERE qh.MaMH = MonHoc.MaMH AND qh.LoaiQuanHe = 'HOC_TRUOC'
+                )
+            """
+        )
+    return len(rows)
+
+
+def rebuild_course_aliases_v3(conn: sqlite3.Connection) -> dict[str, int]:
+    old_rows = []
+    if conn.execute("SELECT type FROM sqlite_master WHERE name = 'MonHocAlias'").fetchone():
+        old_rows = conn.execute("SELECT MaMH, Alias, LoaiAlias, Nguon FROM MonHocAlias").fetchall()
+        conn.execute("DROP TABLE MonHocAlias")
+    conn.execute(
+        """
+        CREATE TABLE MonHocAlias (
+            AliasID INTEGER PRIMARY KEY AUTOINCREMENT,
+            MaMH TEXT NOT NULL,
+            Alias TEXT NOT NULL,
+            AliasKey TEXT NOT NULL UNIQUE,
+            CanonicalText TEXT NOT NULL,
+            LoaiAlias TEXT NOT NULL
+                CHECK (LoaiAlias IN ('MA_MON', 'MA_MON_RUT_GON', 'TEN_MON', 'VIET_TAT', 'BIEN_THE', 'THU_CONG')),
+            Nguon TEXT NOT NULL,
+            DoUuTien INTEGER NOT NULL DEFAULT 100,
+            YeuCauNguCanh INTEGER NOT NULL DEFAULT 0 CHECK (YeuCauNguCanh IN (0, 1)),
+            IsActive INTEGER NOT NULL DEFAULT 1 CHECK (IsActive IN (0, 1)),
+            FOREIGN KEY (MaMH) REFERENCES MonHoc(MaMH)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_monhoc_alias_course ON MonHocAlias(MaMH)")
+
+    courses = {row["MaMH"]: row["TenMH"] for row in conn.execute("SELECT MaMH, TenMH FROM MonHoc")}
+    candidates: dict[str, tuple[str, str, str, str, int, int]] = {}
+    candidate_sources: dict[str, str] = {}
+    ambiguous_generated_keys: set[str] = set()
+
+    def add(ma_mh: str, alias: str, alias_type: str, source: str, priority: int) -> None:
+        if ma_mh not in courses:
+            return
+        key = normalize_alias(alias)
+        if not key:
+            return
+        if key in ambiguous_generated_keys:
+            return
+        canonical = CANONICAL_COURSE_ALIASES.get(ma_mh, (normalize_alias(courses[ma_mh]), []))[0]
+        canonical = normalize_alias(canonical)
+        requires_context = int(len(key) <= 2 or key in {"ai", "it", "ml", "os", "se"})
+        previous = candidates.get(key)
+        record = (ma_mh, alias, canonical, alias_type, priority, requires_context)
+        if previous is not None and previous[0] != ma_mh:
+            if alias_type == "MA_MON_RUT_GON" and previous[3] == "MA_MON_RUT_GON":
+                candidates.pop(key, None)
+                candidate_sources.pop(key, None)
+                ambiguous_generated_keys.add(key)
+                return
+            raise RuntimeError(f"Ambiguous course AliasKey {key!r}: {previous[0]} vs {ma_mh}")
+        if previous is None or priority > previous[4]:
+            candidates[key] = record
+            candidate_sources[key] = source
+
+    for ma_mh, title in courses.items():
+        add(ma_mh, ma_mh, "MA_MON", "MONHOC", 200)
+        prefix = re.match(r"^[A-Za-z]{3,}", ma_mh)
+        if prefix:
+            add(ma_mh, prefix.group(0), "MA_MON_RUT_GON", "MONHOC", 110)
+        add(ma_mh, title, "TEN_MON", "MONHOC", 130)
+    for row in old_rows:
+        add(row["MaMH"], row["Alias"], "BIEN_THE", row["Nguon"], 90)
+    for ma_mh, (canonical, aliases) in CANONICAL_COURSE_ALIASES.items():
+        add(ma_mh, canonical, "THU_CONG", "CANONICAL_TRAIN_VOCAB", 180)
+        for alias in aliases:
+            alias_type = "VIET_TAT" if len(normalize_alias(alias).replace(" ", "")) <= 6 else "BIEN_THE"
+            add(ma_mh, alias, alias_type, "CANONICAL_TRAIN_VOCAB", 170)
+    for pdf_code, canonical_code in PDF_K23_EQUIVALENT_CODES.items():
+        add(canonical_code, pdf_code, "MA_MON", "PDF_K23_EQUIVALENT_CODE", 190)
+
+    stopwords = {"and", "of", "the", "to", "for", "in", "on", "or", "va", "cua"}
+    for ma_mh, title in courses.items():
+        code_match = re.match(r"^([A-Za-z]+)(.+)$", ma_mh)
+        normalized_title = normalize_alias(title)
+        cleaned_title = normalize_alias(re.sub(r"\([^)]*\)", " ", title))
+        acronym_tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+", normalized_title)
+            if token not in stopwords
+        ]
+        acronym = "".join(token if token.isdigit() else token[0] for token in acronym_tokens)
+        generated: list[tuple[str, str]] = []
+        if code_match:
+            prefix, suffix = code_match.groups()
+            generated.extend(
+                [
+                    (f"{prefix} {suffix}", "BIEN_THE"),
+                    (f"{prefix}-{suffix}", "BIEN_THE"),
+                ]
+            )
+            if suffix.upper().endswith("E"):
+                generated.extend(
+                    [
+                        (f"{prefix}{suffix[:-1]}", "BIEN_THE"),
+                        (f"{prefix} {suffix[:-1]}", "BIEN_THE"),
+                    ]
+                )
+            numeric_suffix = suffix[:-1] if suffix.upper().endswith("E") else suffix
+            if numeric_suffix.isdigit() and len(numeric_suffix) == 6:
+                generated.extend(
+                    [
+                        (f"{prefix} {numeric_suffix[:3]} {numeric_suffix[3:]}", "BIEN_THE"),
+                        (f"{prefix}-{numeric_suffix[:3]}-{numeric_suffix[3:]}", "BIEN_THE"),
+                    ]
+                )
+        if cleaned_title and cleaned_title != normalized_title:
+            generated.append((cleaned_title, "BIEN_THE"))
+        if len(acronym) >= 2:
+            generated.append((acronym, "VIET_TAT"))
+
+        canonical = normalize_alias(CANONICAL_COURSE_ALIASES.get(ma_mh, (normalized_title, []))[0])
+        for alias, alias_type in generated:
+            current_count = sum(1 for record in candidates.values() if record[2] == canonical)
+            if current_count >= 5:
+                break
+            key = normalize_alias(alias)
+            previous = candidates.get(key)
+            if key in ambiguous_generated_keys or (previous is not None and previous[0] != ma_mh):
+                continue
+            add(ma_mh, alias, alias_type, "HUMAN_CODE_OR_ACRONYM_VARIANT", 120)
+
+        current_count = sum(1 for record in candidates.values() if record[2] == canonical)
+        if current_count < 5:
+            raise RuntimeError(
+                f"CanonicalText {canonical!r} for {ma_mh} has only {current_count} usable aliases"
+            )
+
+    conn.executemany(
+        """
+        INSERT INTO MonHocAlias
+            (MaMH, Alias, AliasKey, CanonicalText, LoaiAlias, Nguon, DoUuTien, YeuCauNguCanh, IsActive)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """,
+        [
+            (ma_mh, alias, key, canonical, alias_type, candidate_sources[key], priority, context)
+            for key, (ma_mh, alias, canonical, alias_type, priority, context) in sorted(candidates.items())
+        ],
+    )
+    return {"aliases": len(candidates), "canonical_courses": len({record[0] for record in candidates.values()})}
+
+
+def drop_monhoc_excel_row(conn: sqlite3.Connection) -> bool:
+    if not has_column(conn, "MonHoc", "ExcelRow"):
+        return False
+    conn.execute("ALTER TABLE MonHoc DROP COLUMN ExcelRow")
+    return True
+
+
+def ensure_student_identity_schema(conn: sqlite3.Connection) -> None:
+    sinh_vien_columns = {
+        "GioiTinh": "TEXT",
+        "NgaySinh": "TEXT",
+        "NoiSinh": "TEXT",
+        "QuocTich": "TEXT",
+        "DanToc": "TEXT",
+        "TonGiao": "TEXT",
+        "CCCD": "TEXT",
+        "NgayCapCCCD": "TEXT",
+        "NoiCapCCCD": "TEXT",
+        "SoDienThoai": "TEXT",
+        "EmailCaNhan": "TEXT",
+        "DiaChiThuongTru": "TEXT",
+        "DiaChiTamTru": "TEXT",
+        "LopQuanLy": "TEXT",
+        "BacDaoTao": "TEXT",
+        "HeDaoTao": "TEXT",
+        "LoaiHinhDaoTao": "TEXT",
+        "NgayNhapHoc": "TEXT",
+    }
+    for column_name, definition in sinh_vien_columns.items():
+        add_column_if_missing(conn, "SinhVien", column_name, definition)
+
+    tai_khoan_columns = {
+        "AnhDaiDienUrl": "TEXT",
+        "EmailXacThuc": "TEXT",
+        "SoDienThoaiXacThuc": "TEXT",
+        "LanDoiMatKhauCuoi": "TEXT",
+        "YeuCauDoiMatKhau": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for column_name, definition in tai_khoan_columns.items():
+        add_column_if_missing(conn, "TaiKhoan", column_name, definition)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS SinhVienLienHe (
+            MaLienHe TEXT PRIMARY KEY,
+            MaSV TEXT NOT NULL,
+            QuanHe TEXT NOT NULL,
+            HoTen TEXT NOT NULL,
+            SoDienThoai TEXT,
+            DiaChi TEXT,
+            Email TEXT,
+            LaLienHeKhanCap INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (MaSV) REFERENCES SinhVien(MaSV)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sinh_vien_lien_he_masv ON SinhVienLienHe(MaSV)")
+
+    conn.execute(
+        """
+        WITH profile AS (
+          SELECT
+            sv.MaSV,
+            kh.NamNhapHoc,
+            COALESCE(n.BacDaoTao, 'Đại học') AS BacDaoTao,
+            COALESCE(n.HeDaoTao, 'Chính quy') AS HeDaoTao,
+            CAST(substr(sv.MaSV, -2) AS INTEGER) AS seed2,
+            CAST(substr(sv.MaSV, -4) AS INTEGER) AS seed4,
+            CAST(substr(sv.MaSV, -6) AS INTEGER) AS seed6
+          FROM SinhVien sv
+          JOIN KhoaHoc kh ON kh.MaKhoaHoc = sv.MaKhoaHoc
+          JOIN Nganh n ON n.MaNganh = kh.MaNganh
+        )
+        UPDATE SinhVien
+        SET
+            GioiTinh = CASE WHEN (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 2 = 0 THEN 'Nam' ELSE 'Nữ' END,
+            NgaySinh = printf(
+                '%04d-%02d-%02d',
+                (SELECT NamNhapHoc - 18 FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+                ((SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 12) + 1,
+                ((SELECT seed4 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 28) + 1
+            ),
+            NoiSinh = CASE (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 6
+                WHEN 0 THEN 'TP. Hồ Chí Minh'
+                WHEN 1 THEN 'Đồng Nai'
+                WHEN 2 THEN 'Bình Dương'
+                WHEN 3 THEN 'Long An'
+                WHEN 4 THEN 'Tiền Giang'
+                ELSE 'Bà Rịa - Vũng Tàu'
+            END,
+            QuocTich = 'Việt Nam',
+            DanToc = CASE WHEN (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 20 = 0 THEN 'Hoa' ELSE 'Kinh' END,
+            TonGiao = CASE WHEN (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 9 = 0 THEN 'Phật giáo' ELSE 'Không' END,
+            CCCD = printf('%012d', CAST(MaSV AS INTEGER)),
+            NgayCapCCCD = date(
+                printf(
+                    '%04d-%02d-%02d',
+                    (SELECT NamNhapHoc - 18 FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+                    ((SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 12) + 1,
+                    ((SELECT seed4 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 28) + 1
+                ),
+                '+18 years',
+                '+30 days'
+            ),
+            NoiCapCCCD = 'Cục Cảnh sát QLHC về TTXH',
+            SoDienThoai = printf('09%08d', (SELECT seed6 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 100000000),
+            EmailCaNhan = lower(MaSV || '@gmail.com'),
+            DiaChiThuongTru = CASE (SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 6
+                WHEN 0 THEN 'TP. Hồ Chí Minh'
+                WHEN 1 THEN 'Đồng Nai'
+                WHEN 2 THEN 'Bình Dương'
+                WHEN 3 THEN 'Long An'
+                WHEN 4 THEN 'Tiền Giang'
+                ELSE 'Bà Rịa - Vũng Tàu'
+            END,
+            DiaChiTamTru = 'TP. Hồ Chí Minh',
+            LopQuanLy = MaKhoaHoc || '_' || printf('%02d', ((SELECT seed2 FROM profile WHERE profile.MaSV = SinhVien.MaSV) % 6) + 1),
+            BacDaoTao = (SELECT BacDaoTao FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+            HeDaoTao = (SELECT HeDaoTao FROM profile WHERE profile.MaSV = SinhVien.MaSV),
+            LoaiHinhDaoTao = 'Chính quy',
+            NgayNhapHoc = printf('%04d-09-05', (SELECT NamNhapHoc FROM profile WHERE profile.MaSV = SinhVien.MaSV))
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE TaiKhoan
+        SET
+            AnhDaiDienUrl = COALESCE(AnhDaiDienUrl, '/references/ute_logo.png'),
+            EmailXacThuc = COALESCE(EmailXacThuc, Email),
+            SoDienThoaiXacThuc = COALESCE(
+                SoDienThoaiXacThuc,
+                (SELECT SoDienThoai FROM SinhVien WHERE SinhVien.MaSV = TaiKhoan.MaSV)
+            ),
+            LanDoiMatKhauCuoi = COALESCE(LanDoiMatKhauCuoi, ThoiDiemTao),
+            YeuCauDoiMatKhau = COALESCE(YeuCauDoiMatKhau, 0)
+        """
+    )
+
+    conn.execute("DELETE FROM SinhVienLienHe")
+    conn.execute(
+        """
+        INSERT INTO SinhVienLienHe
+            (MaLienHe, MaSV, QuanHe, HoTen, SoDienThoai, DiaChi, Email, LaLienHeKhanCap)
+        SELECT
+            'LH_' || MaSV || '_ME',
+            MaSV,
+            'ME',
+            'Phụ huynh ' || HoTen,
+            printf('08%08d', (CAST(substr(MaSV, -6) AS INTEGER) + 1703) % 100000000),
+            DiaChiThuongTru,
+            NULL,
+            1
+        FROM SinhVien
+        UNION ALL
+        SELECT
+            'LH_' || MaSV || '_CHA',
+            MaSV,
+            'CHA',
+            'Phụ huynh ' || HoTen,
+            printf('03%08d', (CAST(substr(MaSV, -6) AS INTEGER) + 2707) % 100000000),
+            DiaChiThuongTru,
+            NULL,
+            0
+        FROM SinhVien
+        """
+    )
 
 
 def remove_non_current_registrations(conn: sqlite3.Connection) -> int:
@@ -1423,6 +2207,11 @@ def rebuild_registration_eligibility_view(conn: sqlite3.Connection) -> None:
 
 def upsert_metadata(
     conn: sqlite3.Connection,
+    pdf_courses_inserted: int,
+    relationship_stats: dict[str, int],
+    semester_stats: dict[str, int],
+    alias_stats: dict[str, int],
+    dropped_monhoc_excel_row: bool,
     removed_prereq_count: int,
     removed_non_current_count: int,
     moved_future_synthetic_count: int,
@@ -1445,6 +2234,15 @@ def upsert_metadata(
         ("PHIEN_BAN_CSDL", "ctdt_sis_v3"),
         ("THOI_DIEM_TAO_V3", datetime.now().isoformat(timespec="seconds")),
         ("SCRIPT_TAO_V3", "scripts/ctdt_sis_v3.py"),
+        ("V3_NGUON_CTDT_K23", "data/9.-INFORMATION-TECHNOLOGY_K23-1-1.pdf"),
+        ("V3_SO_MON_TU_CHON_BO_SUNG_TU_PDF", str(pdf_courses_inserted)),
+        ("V3_SO_HK_GOI_Y_SUA_THEO_PDF", str(semester_stats["official_changed"])),
+        ("V3_SO_HK_TU_CHON_SUY_LUAN", str(semester_stats["elective_inferred"])),
+        ("V3_SO_QUAN_HE_PDF_TIEN_QUYET", str(relationship_stats["strict_pdf"])),
+        ("V3_SO_QUAN_HE_PDF_HOC_TRUOC", str(relationship_stats["soft_pdf"])),
+        ("V3_SO_QUAN_HE_HOC_PHAN", str(relationship_stats["total"])),
+        ("V3_SO_MON_HOC_ALIAS", str(alias_stats["aliases"])),
+        ("V3_DA_XOA_MONHOC_EXCELROW", str(int(dropped_monhoc_excel_row))),
         ("V3_SO_DANG_KY_XOA_DO_TIEN_QUYET", str(removed_prereq_count)),
         ("V3_SO_DANG_KY_XOA_NGOAI_HOC_KY_HIEN_TAI", str(removed_non_current_count)),
         ("V3_SO_KQHT_TUONG_LAI_SYNTHETIC_DUA_VE_QUA_KHU", str(moved_future_synthetic_count)),
@@ -1466,7 +2264,8 @@ def upsert_metadata(
             "xoa ket qua hien tai/tuong lai; dong bo DANG_HOC tu DangKy; "
             "bo sung ket qua hoc lai dat de can bang no mon theo ty le; "
             "chuan hoa NhomHoSo/GhiChu/trang thai tot nghiep; "
-            "can bang tin chi DangKy hien tai; rebuild view hien tai va dieu kien dang ky.",
+            "can bang tin chi DangKy hien tai; doi chieu CTDT K23; hop nhat quan he hoc phan; "
+            "canonical hoa alias mon hoc; rebuild view hien tai va dieu kien dang ky.",
         ),
         (
             "V3_LOGIC_CANH_BAO_NO_MON",
@@ -1486,8 +2285,56 @@ def upsert_metadata(
 
 
 def validate(conn: sqlite3.Connection) -> None:
+    if has_column(conn, "MonHoc", "ExcelRow"):
+        raise RuntimeError("Validation failed: MonHoc.ExcelRow still exists")
+    for object_name in ("QuanHeHocPhan", "TienQuyet"):
+        row = conn.execute("SELECT type FROM sqlite_master WHERE name = ?", (object_name,)).fetchone()
+        if row is None or row["type"] != "view":
+            raise RuntimeError(f"Validation failed: {object_name} must be a compatibility view")
+    semester_mismatches = [
+        (ma_mh, semester)
+        for ma_mh, semester in PDF_K23_SEMESTERS.items()
+        if conn.execute(
+            "SELECT HKGoiY FROM CTDT_MonHoc WHERE MaCTDT = ? AND MaMH = ?",
+            (CTDT_ID, ma_mh),
+        ).fetchone()[0]
+        != semester
+    ]
+    if semester_mismatches:
+        raise RuntimeError(f"Validation failed for PDF K23 semesters: {semester_mismatches}")
+
     checks = {
         "foreign_key_check": "PRAGMA foreign_key_check",
+        "pdf_prerequisite_semester_order": """
+            SELECT qh.MaMH, qh.MaMHDieuKien
+            FROM CTDT_QuanHeHocPhan qh
+            JOIN CTDT_MonHoc target
+              ON target.MaCTDT = qh.MaCTDT AND target.MaMH = qh.MaMH
+            JOIN CTDT_MonHoc required
+              ON required.MaCTDT = qh.MaCTDT AND required.MaMH = qh.MaMHDieuKien
+            WHERE qh.LoaiQuanHe = 'TIEN_QUYET'
+              AND qh.Nguon LIKE 'PDF_K23%'
+              AND required.HKGoiY >= target.HKGoiY
+        """,
+        "alias_invalid": """
+            SELECT AliasID
+            FROM MonHocAlias
+            WHERE AliasKey = '' OR CanonicalText = '' OR IsActive NOT IN (0, 1)
+        """,
+        "alias_key_collision": """
+            SELECT AliasKey
+            FROM MonHocAlias
+            GROUP BY AliasKey
+            HAVING COUNT(DISTINCT MaMH) > 1
+        """,
+        "canonical_alias_coverage": """
+            SELECT CanonicalText
+            FROM MonHocAlias
+            WHERE IsActive = 1
+            GROUP BY CanonicalText
+            HAVING COUNT(*) < 5
+        """,
+        "ctdt_missing_hk_goi_y": "SELECT MaCTDT, MaMH FROM CTDT_MonHoc WHERE HKGoiY IS NULL",
         "dang_ky_sai_tien_quyet": strict_prerequisite_filter_sql(),
         "siso_mismatch": """
             SELECT l.MaLHP
@@ -1795,7 +2642,8 @@ def validate(conn: sqlite3.Connection) -> None:
     for name, sql in checks.items():
         rows = conn.execute(sql).fetchall()
         if rows:
-            raise RuntimeError(f"Validation failed for {name}: {len(rows)} rows")
+            examples = [dict(row) for row in rows[:5]]
+            raise RuntimeError(f"Validation failed for {name}: {len(rows)} rows; examples={examples}")
 
 
 def migrate(db_path: Path) -> None:
@@ -1806,10 +2654,22 @@ def migrate(db_path: Path) -> None:
         conn.execute("BEGIN")
         refresh_system_semesters(conn)
         sync_current_registration_config(conn)
+        ensure_student_identity_schema(conn)
+        pdf_courses_inserted = ensure_pdf_catalog_courses(conn)
+        relationship_stats = rebuild_curriculum_relationships(conn)
+        semester_stats = apply_k23_semester_plan(conn)
+        softened_description_count = soften_noncausal_description_prerequisites(conn)
+        relationship_stats["strict_pdf"] -= softened_description_count
+        relationship_stats["soft_pdf"] += softened_description_count
+        alias_stats = rebuild_course_aliases_v3(conn)
+        dropped_monhoc_excel_row = drop_monhoc_excel_row(conn)
         removed_non_current_count = remove_non_current_registrations(conn)
-        removed_prereq_count = remove_strict_prerequisite_violations(conn)
         filled_hk_goi_y_count = normalize_required_course_suggested_terms(conn)
         normalized_ctdt_credit_count, filled_group_hk_count = normalize_curriculum_requirements(conn)
+        additionally_softened_count = soften_noncausal_description_prerequisites(conn)
+        relationship_stats["strict_pdf"] -= additionally_softened_count
+        relationship_stats["soft_pdf"] += additionally_softened_count
+        removed_prereq_count = remove_strict_prerequisite_violations(conn)
         moved_future_synthetic_count, deleted_future_completed_count, deleted_stale_study_count = normalize_academic_timeline(conn)
         recalculate_registration_derived_fields(conn)
         normalize_learning_attempts(conn)
@@ -1830,6 +2690,11 @@ def migrate(db_path: Path) -> None:
         rebuild_registration_eligibility_view(conn)
         upsert_metadata(
             conn,
+            pdf_courses_inserted,
+            relationship_stats,
+            semester_stats,
+            alias_stats,
+            dropped_monhoc_excel_row,
             removed_prereq_count,
             removed_non_current_count,
             moved_future_synthetic_count,

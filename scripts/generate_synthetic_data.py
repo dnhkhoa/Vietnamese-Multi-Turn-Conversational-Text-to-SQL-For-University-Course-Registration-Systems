@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.business_rules import DEFAULT_DB_PATH
+from src.course_glossary import build_system_prompt, prompt_metadata
 from src.nl2sql_engine import COURSE_ALIASES, MAJOR_ALIASES, VietnameseNL2SQLEngine
 
 
@@ -456,10 +457,8 @@ def enrich_dialogues(
 
 def qwen_messages_from_dialogues(dialogues: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     examples = []
-    system = (
-        "Bạn là bộ phân tích state cho bài toán Vietnamese multi-turn text-to-SQL "
-        "trong hệ thống đăng ký môn học. Chỉ trả JSON hợp lệ gồm intent, edit_operation, slots."
-    )
+    system = build_system_prompt()
+    prompt_info = prompt_metadata()
     for item in dialogues:
         prev_state: Dict[str, Any] = {}
         for item_turn in item["turns"]:
@@ -482,6 +481,7 @@ def qwen_messages_from_dialogues(dialogues: Iterable[Dict[str, Any]]) -> List[Di
                     "metadata": {
                         "dialogue_id": item["dialogue_id"],
                         "source": item["source"],
+                        **prompt_info,
                     },
                 }
             )

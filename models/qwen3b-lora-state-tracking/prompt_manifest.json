@@ -1,0 +1,16 @@
+{
+  "adapter": "qwen3b-lora-state-tracking",
+  "status": "legacy_prompt_unverified",
+  "trained_prompt_version": null,
+  "trained_prompt_sha256": null,
+  "current_prompt_version": "state-json-v2-k23-glossary",
+  "current_prompt_sha256": "dad2c9b95459c890e53a53550c7fa6f4c729d688af27736e4e64772273a2b9a6",
+  "glossary_version": "k23-glossary-v1",
+  "glossary_sha256": "d32ff7da5431c6fec860383671c7c29e86d0c31e3ac4572b22ad3dc1eccba121",
+  "compatibility": "warning_only_until_retrained",
+  "notes": [
+    "This adapter was committed before the k23-glossary-v1 prompt manifest existed.",
+    "Do not claim glossary model quality from this adapter until real Qwen/LoRA evaluation is run.",
+    "After retraining, set trained_prompt_version and trained_prompt_sha256 to the prompt used for SFT."
+  ]
+}
