@@ -1,0 +1,189 @@
+{
+  "version": "k23-glossary-v1",
+  "target": "qwen-state-parser",
+  "description": "Small course abbreviation glossary for HCMUTE IT K23 state parsing. This is intentionally limited and must not replace database/course catalog validation.",
+  "entries": [
+    {
+      "ma_mh": "DBSY230184E",
+      "official_name": "Database System",
+      "forms": ["CSDL", "co so du lieu", "c so d lieu", "CSCL", "CT430101E"],
+      "requires_course_context": false,
+      "reason": "Very common Vietnamese abbreviation for Database System. CSCL and CT430101E are retained only as legacy observed Qwen output repairs until real model evaluation allows removal."
+    },
+    {
+      "ma_mh": "DBMS330284E",
+      "official_name": "Database management system (2+1)",
+      "forms": ["QTCSDL", "quan tri csdl", "quan tri co so du lieu", "dbms"],
+      "requires_course_context": false,
+      "reason": "Commonly confused with CSDL; useful for registration/prerequisite questions."
+    },
+    {
+      "ma_mh": "INPR130285E",
+      "official_name": "Introduction to Programming",
+      "forms": ["NMLT", "nhap mon lap trinh", "nm lap trinh"],
+      "requires_course_context": false,
+      "reason": "High-frequency first-year programming course abbreviation."
+    },
+    {
+      "ma_mh": "PRTE230385E",
+      "official_name": "Programming techniques",
+      "forms": ["KTLT", "ky thuat lap trinh", "kt lap trinh"],
+      "requires_course_context": false,
+      "reason": "Common Vietnamese shorthand for Programming techniques."
+    },
+    {
+      "ma_mh": "DASA230179E",
+      "official_name": "Data Structures and Algorithms (2+1)",
+      "forms": ["CTDLGT", "ctdl gt", "cau truc du lieu va giai thuat", "DSA"],
+      "requires_course_context": false,
+      "reason": "Core prerequisite course; both Vietnamese and English abbreviations are common."
+    },
+    {
+      "ma_mh": "OOPR230279E",
+      "official_name": "Object-Oriented Programming",
+      "forms": ["LTHDT", "lap trinh huong doi tuong", "OOP"],
+      "requires_course_context": false,
+      "reason": "Common Vietnamese and English abbreviations."
+    },
+    {
+      "ma_mh": "NEES330380E",
+      "official_name": "Networking Essentials (2+1)",
+      "forms": ["MMT", "mang may tinh", "networking essentials"],
+      "requires_course_context": false,
+      "reason": "Common shorthand for computer networking in student questions."
+    },
+    {
+      "ma_mh": "CNDE430780E",
+      "official_name": "Network Design (2+1)",
+      "forms": ["TKM", "thiet ke mang", "network design"],
+      "requires_course_context": false,
+      "reason": "Upper-year network course abbreviation."
+    },
+    {
+      "ma_mh": "INSE330380E",
+      "official_name": "Information Security (INSE330380E)",
+      "forms": ["ATTT", "an toan thong tin", "information security"],
+      "requires_course_context": false,
+      "reason": "Common security-course shorthand."
+    },
+    {
+      "ma_mh": "ARIN330585E",
+      "official_name": "Artificial Intelligence",
+      "forms": ["TTNT", "tri tue nhan tao"],
+      "requires_course_context": false,
+      "reason": "Vietnamese abbreviation is specific enough for course parsing."
+    },
+    {
+      "ma_mh": "ARIN330585E",
+      "official_name": "Artificial Intelligence",
+      "forms": ["AI"],
+      "requires_course_context": true,
+      "reason": "AI is also a Vietnamese pronoun without accents; only map in explicit course context."
+    },
+    {
+      "ma_mh": "WEPR330479E",
+      "official_name": "Web Programming",
+      "forms": ["LTW", "lap trinh web", "web programming"],
+      "requires_course_context": false,
+      "reason": "Common abbreviation for web programming."
+    },
+    {
+      "ma_mh": "OPSY330280E",
+      "official_name": "Operating system (2+1)",
+      "forms": ["HDH", "he dieu hanh"],
+      "requires_course_context": false,
+      "reason": "Vietnamese shorthand is specific."
+    },
+    {
+      "ma_mh": "OPSY330280E",
+      "official_name": "Operating system (2+1)",
+      "forms": ["OS"],
+      "requires_course_context": true,
+      "reason": "OS is short and may appear outside course mentions."
+    },
+    {
+      "ma_mh": "CAAL230180E",
+      "official_name": "Computer Architecture and Assembly Language (2+1)",
+      "forms": ["KTMT", "kien truc may tinh", "computer architecture"],
+      "requires_course_context": false,
+      "reason": "Core architecture course abbreviation."
+    },
+    {
+      "ma_mh": "DIGR230485E",
+      "official_name": "Discrete Mathematics and Graph Theory",
+      "forms": ["TRR", "toan roi rac", "discrete mathematics"],
+      "requires_course_context": false,
+      "reason": "Common shorthand for discrete mathematics."
+    },
+    {
+      "ma_mh": "MATH132901E",
+      "official_name": "Mathematical Statistics for Engineers",
+      "forms": ["XSTK", "xac suat thong ke", "mathematical statistics"],
+      "requires_course_context": false,
+      "reason": "Common shorthand for probability/statistics questions."
+    },
+    {
+      "ma_mh": "INDS331085E",
+      "official_name": "Introduction to Data Science",
+      "forms": ["KHDL", "khoa hoc du lieu", "data science"],
+      "requires_course_context": false,
+      "reason": "Common Vietnamese and English references for data science."
+    },
+    {
+      "ma_mh": "INDS331085E",
+      "official_name": "Introduction to Data Science",
+      "forms": ["DS"],
+      "requires_course_context": true,
+      "reason": "DS is short and can be a generic abbreviation outside course mentions."
+    },
+    {
+      "ma_mh": "MALE431085E",
+      "official_name": "Machine Learning",
+      "forms": ["HM", "hoc may", "machine learning"],
+      "requires_course_context": false,
+      "reason": "Common shorthand for Machine Learning."
+    },
+    {
+      "ma_mh": "MALE431085E",
+      "official_name": "Machine Learning",
+      "forms": ["ML"],
+      "requires_course_context": true,
+      "reason": "ML is short and can appear as a generic acronym."
+    },
+    {
+      "ma_mh": "NLPR431585E",
+      "official_name": "Natural Language Processing",
+      "forms": ["XLNNTN", "xu ly ngon ngu tu nhien", "natural language processing"],
+      "requires_course_context": false,
+      "reason": "Useful upper-year AI/NLP course shorthand."
+    },
+    {
+      "ma_mh": "NLPR431585E",
+      "official_name": "Natural Language Processing",
+      "forms": ["NLP"],
+      "requires_course_context": true,
+      "reason": "NLP is short and may occur as a general technology acronym."
+    },
+    {
+      "ma_mh": "MOPR331279E",
+      "official_name": "Mobile programming (2+1)",
+      "forms": ["LTDD", "lap trinh di dong", "mobile programming"],
+      "requires_course_context": false,
+      "reason": "Common shorthand for mobile programming."
+    },
+    {
+      "ma_mh": "CLCO332779E",
+      "official_name": "Cloud computing (2+1) - elective",
+      "forms": ["DTDM", "dien toan dam may", "cloud computing"],
+      "requires_course_context": false,
+      "reason": "Common shorthand for cloud computing."
+    },
+    {
+      "ma_mh": "CLCO332779E",
+      "official_name": "Cloud computing (2+1) - elective",
+      "forms": ["CLOUD"],
+      "requires_course_context": true,
+      "reason": "English technology word; map only when course context is explicit."
+    }
+  ]
+}

@@ -401,9 +401,9 @@ class VietnameseNL2SQLEngine:
 
         previous_state = self._previous_state(previous)
         try:
-            llm_state = self.state_parser.parse(canonical_text, previous_state)
+            llm_state = self.state_parser.parse(user_text, previous_state)
             if self.repair_model_output:
-                llm_parsed = self._normalize_external_state(llm_state.as_dict(), canonical_text, previous, rule_parsed)
+                llm_parsed = self._normalize_external_state(llm_state.as_dict(), user_text, previous, rule_parsed)
             else:
                 llm_parsed = {
                     "intent": llm_state.intent,
