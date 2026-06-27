@@ -181,7 +181,7 @@ def test_exact_alias_locks_course_slot_before_model_execution() -> None:
     finally:
         engine.close()
 
-    assert parser.last_utterance == "co so du lieu may tin chi"
+    assert parser.last_utterance == "c sở d liệu mấy tín chỉ?"
     assert result.slots["MaMH"] == "DBSY230184E"
 
 
