@@ -54,6 +54,14 @@ def dataframe_from_rows(rows: Iterable[sqlite3.Row | Dict[str, Any]]) -> pd.Data
     return pd.DataFrame([dict(row) for row in rows])
 
 
+def table_or_view_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = ? AND type IN ('table', 'view')",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
 @dataclass
 class QueryContext:
     intent: Optional[str] = None
