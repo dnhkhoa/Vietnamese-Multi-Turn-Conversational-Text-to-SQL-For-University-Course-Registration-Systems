@@ -1,0 +1,20 @@
+{
+  "dialogue_length_distribution": {
+    "1": 337,
+    "2": 297,
+    "3": 264,
+    "4": 1200,
+    "5": 107,
+    "6": 422,
+    "7": 60,
+    "8": 56
+  },
+  "dialogues": 2743,
+  "error_codes": {},
+  "error_examples": [],
+  "errors": 0,
+  "rows": 10458,
+  "warning_codes": {},
+  "warning_examples": [],
+  "warnings": 0
+}

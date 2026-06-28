@@ -1,0 +1,19 @@
+{
+  "database": "data\\ctdt_sis_v3.db",
+  "manual_style_target_turns": 2000,
+  "seed": 20260621,
+  "source_dialogue_length_distribution": {
+    "2": 102,
+    "3": 102,
+    "4": 2003,
+    "5": 104,
+    "6": 504,
+    "7": 103,
+    "8": 102
+  },
+  "source_dialogues": 3020,
+  "source_turns": 13603,
+  "synthetic_target_turns": 8000,
+  "targeted_dialogues_per_family": 180,
+  "version": "v9"
+}

@@ -1,0 +1,138 @@
+{
+  "after": {
+    "balanced_intent_cap": 873,
+    "deduplicated_rows": 10458,
+    "duplicate_rows": 0,
+    "duplicates_removed": 3145,
+    "input_dialogue_length_distribution": {
+      "2": 102,
+      "3": 102,
+      "4": 2003,
+      "5": 104,
+      "6": 504,
+      "7": 103,
+      "8": 102
+    },
+    "sources": {
+      "curated_synthetic_manual_style": 1607,
+      "stateful_context_switch": 1200,
+      "student_profile_advising": 1120,
+      "targeted_natural_synthetic_v9": 2685,
+      "template_synthetic": 3846
+    },
+    "split_dialogues": {
+      "dev": 274,
+      "test": 274,
+      "train": 2195
+    },
+    "split_overlap": {
+      "dev_test": 0,
+      "train_dev": 0,
+      "train_test": 0
+    },
+    "split_rows": {
+      "dev": 1040,
+      "test": 1085,
+      "test_business_rule": 200,
+      "test_sql": 885,
+      "train_balanced": 7219,
+      "train_full": 8333
+    },
+    "test_intents": {
+      "AGGREGATION_STATISTICS": 43,
+      "COURSE_INFO_SEARCH": 85,
+      "COURSE_OFFERING_SEARCH": 51,
+      "COURSE_SCHEDULE_SEARCH": 138,
+      "CREDIT_SUMMARY": 103,
+      "CURRICULUM_COURSE_SEARCH": 55,
+      "PREREQUISITE_LOOKUP": 125,
+      "REGISTRATION_ELIGIBILITY_CHECK": 200,
+      "STUDENT_INFO_LOOKUP": 62,
+      "STUDENT_REGISTRATION_LOOKUP": 110,
+      "STUDENT_RESULT_LOOKUP": 113
+    },
+    "train_balanced_intents": {
+      "AGGREGATION_STATISTICS": 504,
+      "COURSE_INFO_SEARCH": 593,
+      "COURSE_OFFERING_SEARCH": 517,
+      "COURSE_SCHEDULE_SEARCH": 873,
+      "CREDIT_SUMMARY": 669,
+      "CURRICULUM_COURSE_SEARCH": 349,
+      "PREREQUISITE_LOOKUP": 863,
+      "REGISTRATION_ELIGIBILITY_CHECK": 873,
+      "STUDENT_INFO_LOOKUP": 476,
+      "STUDENT_REGISTRATION_LOOKUP": 736,
+      "STUDENT_RESULT_LOOKUP": 766
+    },
+    "train_full_intents": {
+      "AGGREGATION_STATISTICS": 504,
+      "COURSE_INFO_SEARCH": 593,
+      "COURSE_OFFERING_SEARCH": 517,
+      "COURSE_SCHEDULE_SEARCH": 1191,
+      "CREDIT_SUMMARY": 669,
+      "CURRICULUM_COURSE_SEARCH": 349,
+      "PREREQUISITE_LOOKUP": 863,
+      "REGISTRATION_ELIGIBILITY_CHECK": 1669,
+      "STUDENT_INFO_LOOKUP": 476,
+      "STUDENT_REGISTRATION_LOOKUP": 736,
+      "STUDENT_RESULT_LOOKUP": 766
+    },
+    "unrecoverable_history_rows": 0
+  },
+  "before": {
+    "duplicate_rows": 1177,
+    "eval_rows": 6000,
+    "rows": 6000,
+    "train_eval_overlap": 6000,
+    "unrecoverable_history_rows": 125
+  },
+  "database": {
+    "path": "data\\ctdt_sis_v3.db",
+    "sha256": "b7310a15a907a2cebdb55ae3944bc228b1e3f54aea99fc9b41042e96386745c0",
+    "size_bytes": 36442112
+  },
+  "gold_refresh": {
+    "changed": 10458,
+    "checked": 10458,
+    "failed": 0,
+    "failure_examples": []
+  },
+  "gold_validation": {
+    "checked": 1694,
+    "failed": 0,
+    "failure_examples": []
+  },
+  "inputs": [
+    "data\\v9\\source_synthetic_v9.jsonl",
+    "data\\v9\\source_manual_style_v9.jsonl",
+    "data\\v9\\source_targeted_natural_v9.jsonl"
+  ],
+  "remaining_limitations": [
+    "No genuinely user-collected, independently human-annotated test set is available.",
+    "Older v02 sources remain template-driven; added sources improve but do not replace real linguistic diversity.",
+    "SQL gold is engine-generated, although held-out SQL was independently re-executed for consistency.",
+    "Model accuracy was not measured on this CPU-only machine."
+  ],
+  "seed": 20260621,
+  "semantic_audit": {
+    "dialogue_length_distribution": {
+      "1": 337,
+      "2": 297,
+      "3": 264,
+      "4": 1200,
+      "5": 107,
+      "6": 422,
+      "7": 60,
+      "8": 56
+    },
+    "dialogues": 2743,
+    "error_codes": {},
+    "error_examples": [],
+    "errors": 0,
+    "rows": 10458,
+    "warning_codes": {},
+    "warning_examples": [],
+    "warnings": 0
+  },
+  "version": "v9"
+}

@@ -1,0 +1,139 @@
+{
+  "checks": {
+    "database_fingerprint_present": true,
+    "duplicate_rows_zero": true,
+    "gold_validation_clean": true,
+    "oracle_business_result": true,
+    "oracle_joint_state_exact": true,
+    "oracle_slot_f1": true,
+    "oracle_sql_execution": true,
+    "semantic_all_clean": true,
+    "semantic_dev_clean": true,
+    "semantic_test_clean": true,
+    "split_overlap_zero": true,
+    "unrecoverable_history_zero": true
+  },
+  "database": {
+    "path": "data\\ctdt_sis_v3.db",
+    "sha256": "b7310a15a907a2cebdb55ae3944bc228b1e3f54aea99fc9b41042e96386745c0",
+    "size_bytes": 36442112
+  },
+  "evaluator_oracle_self_test": {
+    "business_rule": {
+      "result_hash_accuracy": 1.0,
+      "result_hash_accuracy_on_covered": 1.0,
+      "result_hash_covered": 200,
+      "state_exact_match": 1.0,
+      "total": 200
+    },
+    "sql": {
+      "covered": 885,
+      "error_examples": [],
+      "exact_match": 1.0,
+      "execution_accuracy": 1.0,
+      "execution_errors": 0,
+      "total": 885
+    },
+    "state_tracking": {
+      "by_gold_intent": {
+        "AGGREGATION_STATISTICS": {
+          "joint_state_exact_match": 1.0,
+          "total": 43
+        },
+        "COURSE_INFO_SEARCH": {
+          "joint_state_exact_match": 1.0,
+          "total": 85
+        },
+        "COURSE_OFFERING_SEARCH": {
+          "joint_state_exact_match": 1.0,
+          "total": 51
+        },
+        "COURSE_SCHEDULE_SEARCH": {
+          "joint_state_exact_match": 1.0,
+          "total": 138
+        },
+        "CREDIT_SUMMARY": {
+          "joint_state_exact_match": 1.0,
+          "total": 103
+        },
+        "CURRICULUM_COURSE_SEARCH": {
+          "joint_state_exact_match": 1.0,
+          "total": 55
+        },
+        "PREREQUISITE_LOOKUP": {
+          "joint_state_exact_match": 1.0,
+          "total": 125
+        },
+        "REGISTRATION_ELIGIBILITY_CHECK": {
+          "joint_state_exact_match": 1.0,
+          "total": 200
+        },
+        "STUDENT_INFO_LOOKUP": {
+          "joint_state_exact_match": 1.0,
+          "total": 62
+        },
+        "STUDENT_REGISTRATION_LOOKUP": {
+          "joint_state_exact_match": 1.0,
+          "total": 110
+        },
+        "STUDENT_RESULT_LOOKUP": {
+          "joint_state_exact_match": 1.0,
+          "total": 113
+        }
+      },
+      "covered": 1085,
+      "edit_operation_accuracy": 1.0,
+      "error_examples": [],
+      "intent_accuracy": 1.0,
+      "joint_state_exact_match": 1.0,
+      "missing_or_invalid": 0,
+      "slot_micro_f1": 1.0,
+      "slot_micro_precision": 1.0,
+      "slot_micro_recall": 1.0,
+      "slots_exact_match": 1.0,
+      "total": 1085
+    }
+  },
+  "passed": true,
+  "semantic_dev": {
+    "dialogue_length_distribution": {
+      "1": 34,
+      "2": 26,
+      "3": 28,
+      "4": 129,
+      "5": 6,
+      "6": 39,
+      "7": 6,
+      "8": 6
+    },
+    "dialogues": 274,
+    "error_codes": {},
+    "error_examples": [],
+    "errors": 0,
+    "rows": 1040,
+    "warning_codes": {},
+    "warning_examples": [],
+    "warnings": 0
+  },
+  "semantic_test": {
+    "dialogue_length_distribution": {
+      "1": 28,
+      "2": 31,
+      "3": 24,
+      "4": 116,
+      "5": 12,
+      "6": 50,
+      "7": 5,
+      "8": 8
+    },
+    "dialogues": 274,
+    "error_codes": {},
+    "error_examples": [],
+    "errors": 0,
+    "rows": 1085,
+    "warning_codes": {},
+    "warning_examples": [],
+    "warnings": 0
+  },
+  "version": "v9"
+}
