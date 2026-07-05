@@ -161,8 +161,17 @@
         score4: item.score4 ?? "",
         letter: item.letter || "",
         result: item.result === "KHONG_DAT" ? "Không đạt" : item.result === "DANG_HOC" ? "Đang học" : "Đạt",
-        note: item.note === "Nhập từ bảng KetQua tổng hợp" ? "" : (item.note || "")
+        note: displayMarkNote(item.note)
       }));
+    }
+
+    function displayMarkNote(note) {
+      const value = note || "";
+      const hiddenNotes = ["Nhập từ bảng KetQua tổng hợp", "Đăng ký hiện tại"];
+      return hiddenNotes.includes(value)
+        || value.startsWith("Bổ sung kết quả học lại đạt để cân bằng dữ liệu nợ môn v3")
+        ? ""
+        : value;
     }
 
     async function loadPortalData() {

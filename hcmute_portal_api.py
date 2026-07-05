@@ -253,7 +253,10 @@ def marks(ma_sv: str) -> list[dict[str, Any]]:
                 KetQua AS result,
                 LoaiHoc AS studyType,
                 CASE
-                    WHEN GhiChu = 'Nhập từ bảng KetQua tổng hợp' THEN NULL
+                    WHEN GhiChu = 'Nhập từ bảng KetQua tổng hợp'
+                      OR GhiChu = 'Đăng ký hiện tại'
+                      OR GhiChu LIKE 'Bổ sung kết quả học lại đạt để cân bằng dữ liệu nợ môn v3%'
+                    THEN NULL
                     ELSE GhiChu
                 END AS note
             FROM v_ket_qua_hoc_tap_sv
