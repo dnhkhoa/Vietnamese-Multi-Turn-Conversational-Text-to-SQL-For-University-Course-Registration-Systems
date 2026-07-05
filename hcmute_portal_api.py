@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DB_PATH = PROJECT_ROOT / "data" / "ctdt_sis_v3.db"
 CURRICULUM_XLSX_PATH = PROJECT_ROOT / "data" / "CTDT_HCMUTE.xlsx"
 PORTAL_HTML_PATH = PROJECT_ROOT / "hcmute_online_portal_clone.html"
+PORTAL_CSS_PATH = PROJECT_ROOT / "style.css"
 
 
 def connect_db() -> sqlite3.Connection:
@@ -311,6 +312,9 @@ class PortalHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/portal"}:
             self.send_bytes(PORTAL_HTML_PATH.read_bytes(), "text/html; charset=utf-8")
+            return
+        if parsed.path == "/style.css":
+            self.send_bytes(PORTAL_CSS_PATH.read_bytes(), "text/css; charset=utf-8")
             return
         if parsed.path == "/references/ute_logo.png":
             self.send_bytes((PROJECT_ROOT / "references" / "ute_logo.png").read_bytes(), "image/png")
