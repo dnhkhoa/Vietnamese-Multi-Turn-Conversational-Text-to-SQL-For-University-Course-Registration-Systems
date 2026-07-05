@@ -155,28 +155,7 @@ def login(username: str, password: str) -> dict[str, Any]:
 
 
 def notifications() -> list[dict[str, str]]:
-    return [
-        {
-            "title": "Thông báo đăng ký dự lễ tốt nghiệp dành cho nghiên cứu sinh, học viên cao học tốt nghiệp tháng 7/2026 trở về trước và sinh viên đại học chính quy, vừa học vừa làm tốt nghiệp tháng 3,4,5/2026",
-            "sender": "PDT_Bùi Thị Quỳnh",
-            "time": "17/06/2026 15:15:27",
-        },
-        {
-            "title": "Thông báo Công nhận chứng chỉ tiếng Anh Cambridge xét đạt chuẩn đầu ra ngoại ngữ.",
-            "sender": "PDT_Bùi Thị Quỳnh",
-            "time": "03/06/2026 15:21:41",
-        },
-        {
-            "title": "Phòng Đào tạo thông báo về việc Sinh viên có tên trong danh sách dự kiến được công nhận tốt nghiệp đại học chính quy đợt 3 năm học 2025-2026 lần 2",
-            "sender": "PDT_Bùi Thị Quỳnh",
-            "time": "20/05/2026 17:03:05",
-        },
-        {
-            "title": "THÔNG BÁO về việc rút học phần qua mạng học kỳ 2 năm học 2025 - 2026",
-            "sender": "PDT_Nguyễn Thị Bích Hồng",
-            "time": "15/05/2026 17:21:33",
-        },
-    ]
+    return []
 
 
 def curriculum_from_excel() -> list[dict[str, Any]]:
@@ -273,7 +252,13 @@ def marks(ma_sv: str) -> list[dict[str, Any]]:
                 DiemChu AS letter,
                 KetQua AS result,
                 LoaiHoc AS studyType,
-                GhiChu AS note
+                CASE
+                    WHEN GhiChu = 'Nhập từ bảng KetQua tổng hợp'
+                      OR GhiChu = 'Đăng ký hiện tại'
+                      OR GhiChu LIKE 'Bổ sung kết quả học lại đạt để cân bằng dữ liệu nợ môn v3%'
+                    THEN NULL
+                    ELSE GhiChu
+                END AS note
             FROM v_ket_qua_hoc_tap_sv
             WHERE MaSV = :ma_sv
             ORDER BY NamHoc, HocKy, TenMH, LanHoc
@@ -316,8 +301,8 @@ class PortalHandler(BaseHTTPRequestHandler):
         if parsed.path == "/style.css":
             self.send_bytes(PORTAL_CSS_PATH.read_bytes(), "text/css; charset=utf-8")
             return
-        if parsed.path == "/references/ute_logo.png":
-            self.send_bytes((PROJECT_ROOT / "references" / "ute_logo.png").read_bytes(), "image/png")
+        if parsed.path == "/assets/ute_logo.png":
+            self.send_bytes((PROJECT_ROOT / "assets" / "ute_logo.png").read_bytes(), "image/png")
             return
         if parsed.path == "/api/health":
             self.send_json({"ok": True})

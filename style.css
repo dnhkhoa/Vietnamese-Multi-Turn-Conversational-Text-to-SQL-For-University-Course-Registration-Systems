@@ -23,7 +23,7 @@
   --font-family: Arial, Helvetica, sans-serif;
   --sidebar-width: 240px;
   --header-height: 55px;
-  --radius-input: 2px;
+  --radius-input: 5px;
   --radius-panel: 3px;
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 10%);
 }
@@ -43,7 +43,7 @@ input,
 select,
 textarea {
   font-family: var(--font-family);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 button { cursor: pointer; }
@@ -152,8 +152,8 @@ button { cursor: pointer; }
 .search-input input,
 .agent-composer textarea {
   width: 100%;
-  min-height: 31px;
-  padding: 5px 8px;
+  min-height: 38px;
+  padding: 8px 10px;
   border: 1px solid #b8c0c8;
   border-radius: var(--radius-input);
   background: #fff;
@@ -189,6 +189,7 @@ button { cursor: pointer; }
 
 .login-card .portal-button {
   width: 100%;
+  min-height: 38px;
   margin-top: 2px;
 }
 
@@ -208,15 +209,10 @@ button { cursor: pointer; }
 }
 
 .google-mark {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: inline-grid;
-  place-items: center;
-  color: #4285f4;
-  font-size: 13px;
-  font-weight: 700;
-  border: 1px solid #d9d9d9;
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex: 0 0 18px;
 }
 
 .forgot {
@@ -263,11 +259,12 @@ button { cursor: pointer; }
 }
 
 .sidebar-logo {
-  height: 138px;
+  height: 150px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: 8px 0;
   border-bottom: 1px solid rgb(255 255 255 / 18%);
   text-decoration: none;
   color: #fff;
@@ -282,9 +279,10 @@ button { cursor: pointer; }
 }
 
 .sidebar-logo .brand-logo-img {
-  width: 118px;
-  height: 144px;
-  margin: -4px auto 0;
+  width: auto;
+  height: 100%;
+  max-width: 112px;
+  margin: 0 auto;
   object-fit: contain;
 }
 
@@ -301,8 +299,8 @@ button { cursor: pointer; }
 }
 
 .avatar {
-  width: 72px;
-  height: 72px;
+  width: 62px;
+  height: 62px;
   margin: 0 auto 7px;
   border-radius: 50%;
   border: 2px solid #fff;
@@ -412,8 +410,8 @@ button { cursor: pointer; }
 }
 
 .header-avatar {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 1px solid #fff;
   background:
@@ -525,10 +523,11 @@ button { cursor: pointer; }
 }
 
 .toolbar select {
-  min-width: 190px;
-  height: 30px;
+  min-width: 200px;
+  height: 38px;
+  padding: 0 10px;
   border: 1px solid #b8c0c8;
-  border-radius: 2px;
+  border-radius: var(--radius-input);
   background: #fff;
   color: #222;
 }
@@ -548,7 +547,7 @@ button { cursor: pointer; }
   content: "⌕";
   position: absolute;
   left: 8px;
-  top: 6px;
+  top: 9px;
   z-index: 1;
   color: #777;
   font-size: 14px;
@@ -559,6 +558,10 @@ button { cursor: pointer; }
   overflow-x: auto;
   border: 1px solid var(--border-table);
   background: #fff;
+}
+
+.curriculum-table .department-column {
+  min-width: 180px;
 }
 
 table {
@@ -598,6 +601,12 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
   font-weight: 700;
 }
 
+.empty-notification {
+  padding: 22px 10px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 .group-pink td {
   background: var(--group-row-pink) !important;
   color: #21354d;
@@ -614,7 +623,36 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 
 .summary-row td {
   background: var(--summary-row-yellow) !important;
+  padding: 0;
+}
+
+.semester-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.semester-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+}
+
+.semester-summary > div + div {
+  border-left: 1px solid #d2aa62;
+}
+
+.semester-summary strong {
+  margin-bottom: 2px;
+  color: #623d00;
+  font-size: 13px;
+}
+
+.semester-summary span {
   font-weight: 700;
+}
+
+.semester-summary b {
+  color: #142f4b;
 }
 
 .failed-row td {
@@ -623,6 +661,7 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 
 .status-pass { color: var(--success); font-weight: 700; }
 .status-fail { color: var(--danger); font-weight: 700; }
+.status-pending { color: var(--portal-orange); font-weight: 700; }
 
 .student-grid {
   display: grid;
@@ -656,8 +695,8 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 }
 
 .avatar-panel .avatar {
-  width: 112px;
-  height: 112px;
+  width: 96px;
+  height: 96px;
   margin-bottom: 9px;
   border-color: #d3dce4;
 }
@@ -671,6 +710,216 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 .chart-box {
   min-height: 152px;
   padding: 10px;
+}
+
+.academic-chart-summary {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 7px 0 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.academic-chart {
+  position: relative;
+  height: 145px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 12px 28px;
+  border-left: 1px solid #d1dbe3;
+  border-bottom: 1px solid #d1dbe3;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      #e8edf1 28px
+    );
+  overflow-x: auto;
+}
+
+.academic-bar-item {
+  position: relative;
+  z-index: 2;
+  width: 34px;
+  height: 100%;
+  flex: 0 0 34px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.academic-score {
+  margin-bottom: 3px;
+  color: #334b63;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.academic-bar-column {
+  width: 100%;
+  min-height: 2px;
+  background: #5575ca;
+  border: 1px solid #4664b5;
+}
+
+.academic-bar-item small {
+  position: absolute;
+  top: calc(100% + 5px);
+  width: 56px;
+  overflow: hidden;
+  color: #617181;
+  font-size: 8px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.academic-average-line {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: 3;
+  border-top: 2px solid #83c565;
+  pointer-events: none;
+}
+
+.academic-average-line span {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #fff;
+  color: #57953b;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.academic-chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.academic-chart-legend i {
+  display: inline-block;
+  width: 12px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.legend-line { border-top: 2px solid #83c565; }
+.legend-bar {
+  height: 8px;
+  background: #5575ca;
+}
+
+.academic-chart-empty {
+  display: grid;
+  min-height: 145px;
+  place-items: center;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.progress-chart-box {
+  min-height: 245px;
+}
+
+.study-progress-title {
+  text-align: center;
+}
+
+.study-progress-title .panel-header {
+  font-size: 16px;
+}
+
+.study-progress-title p {
+  margin: 5px 0 2px;
+  color: var(--text-secondary);
+}
+
+.study-progress-content {
+  position: relative;
+  min-height: 162px;
+  display: grid;
+  place-items: center;
+}
+
+.study-progress-legend {
+  position: absolute;
+  left: 2px;
+  top: 10px;
+  display: grid;
+  gap: 8px;
+  color: #4f5f6d;
+  font-size: 11px;
+}
+
+.study-progress-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.study-progress-legend i {
+  width: 22px;
+  height: 12px;
+  display: inline-block;
+  border-radius: 3px;
+}
+
+.progress-completed { background: #5575ca; }
+.progress-remaining { background: #8dca70; }
+
+.study-progress-pie {
+  --completed-degrees: 0deg;
+  width: 142px;
+  height: 142px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(
+    #5575ca 0 var(--completed-degrees),
+    #8dca70 var(--completed-degrees) 360deg
+  );
+  box-shadow: 0 0 0 1px rgb(23 49 77 / 12%);
+}
+
+.study-progress-center {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-content: center;
+  border-radius: 50%;
+  background: #fff;
+  text-align: center;
+  box-shadow: 0 0 0 1px rgb(23 49 77 / 9%);
+}
+
+.study-progress-center strong {
+  color: var(--portal-blue-dark);
+  font-size: 17px;
+}
+
+.study-progress-center span {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.current-registration {
+  margin: 5px 0 0;
+  text-align: center;
 }
 
 .bar {
@@ -729,9 +978,10 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
   position: fixed;
   right: 24px;
   bottom: 76px;
-  width: 390px;
+  width: 560px;
   max-width: calc(100vw - 48px);
-  max-height: 70vh;
+  height: calc(100dvh - 116px);
+  max-height: 720px;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -762,7 +1012,8 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 }
 
 .agent-messages {
-  min-height: 190px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 9px;
   border-bottom: 1px solid #d7d7d7;
@@ -778,7 +1029,12 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 }
 
 .message.assistant { background: #f5f6f7; }
-.message.user { background: #e9f4fb; }
+.message.user {
+  width: fit-content;
+  max-width: 80%;
+  margin-left: auto;
+  background: #e9f4fb;
+}
 
 .suggestions {
   display: flex;
@@ -806,7 +1062,7 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 
 .agent-composer textarea {
   resize: none;
-  min-height: 34px;
+  min-height: 40px;
   max-height: 80px;
   line-height: 1.35;
 }
@@ -828,6 +1084,21 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
 }
 
 @media (max-width: 720px) {
+  .agent-panel {
+    right: 10px;
+    bottom: 68px;
+    width: calc(100vw - 20px);
+    max-width: none;
+    height: calc(100dvh - 88px);
+    max-height: none;
+  }
+  .semester-summary {
+    grid-template-columns: 1fr;
+  }
+  .semester-summary > div + div {
+    border-top: 1px solid #d2aa62;
+    border-left: 0;
+  }
   .drawer-toggle {
     display: inline-block;
     border: 1px solid rgb(255 255 255 / 50%);
