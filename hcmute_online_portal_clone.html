@@ -39,12 +39,8 @@
     };
     let student = { ...emptyStudent };
 
-    let notifications = [
-      { title: "Thông báo lịch đăng ký học phần học kỳ 2 năm 2026", sender: "Phòng Đào tạo", time: "20/06/2026 08:00" },
-      { title: "Hướng dẫn tra cứu chương trình đào tạo và kết quả học tập", sender: "Phòng CTSV", time: "18/06/2026 15:35" },
-      { title: "Cập nhật dữ liệu lớp học phần trên cổng thông tin", sender: "Trung tâm dữ liệu", time: "15/06/2026 09:20" },
-      { title: "Nhắc sinh viên kiểm tra thông tin cá nhân", sender: "Phòng Đào tạo", time: "10/06/2026 10:10" }
-    ];
+    let notifications = [];
+    let activeNotificationTab = "general";
 
     let curriculumRows = [
       { code: "ADNT330580E", name: "Advanced Networking Technology", credits: 3, type: "Bắt buộc", term: 1, prereq: "Data communications; Networking Essentials" },
@@ -165,7 +161,7 @@
         score4: item.score4 ?? "",
         letter: item.letter || "",
         result: item.result === "KHONG_DAT" ? "Không đạt" : item.result === "DANG_HOC" ? "Đang học" : "Đạt",
-        note: item.note || item.studyType || ""
+        note: item.note === "Nhập từ bảng KetQua tổng hợp" ? "" : (item.note || "")
       }));
     }
 
@@ -184,7 +180,7 @@
           sessionStorage.portalStudent = JSON.stringify(student);
           sessionStorage.portalStudentId = student.id;
         }
-        notifications = notificationPayload.items || notifications;
+        notifications = Array.isArray(notificationPayload.items) ? notificationPayload.items : [];
         curriculumRows = mapApiCurriculum(curriculumPayload.items || curriculumRows);
         marks = mapApiMarks(marksPayload.items || marks);
       } catch (error) {
@@ -215,12 +211,21 @@
       renderShell(current);
     }
 
+    function googleLogo() {
+      return `
+        <svg class="google-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.41Z"/>
+          <path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.36l-3.24-2.54c-.9.6-2.05.96-3.38.96-2.6 0-4.81-1.76-5.6-4.13H3.06v2.62A10 10 0 0 0 12 22Z"/>
+          <path fill="#FBBC05" d="M6.4 13.93A6.02 6.02 0 0 1 6.09 12c0-.67.11-1.32.31-1.93V7.45H3.06A10 10 0 0 0 2 12c0 1.61.38 3.14 1.06 4.55l3.34-2.62Z"/>
+          <path fill="#EA4335" d="M12 5.94c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.94 5.45l3.34 2.62C7.19 7.7 9.4 5.94 12 5.94Z"/>
+        </svg>`;
+    }
+
     function renderLogin() {
       document.getElementById("app").innerHTML = `
         <main class="login-page">
           <section class="login-brand" aria-label="HCMUTE">
-            <img class="brand-logo-img" src="references/ute_logo.png" alt="HCMUTE">
-            <h1>HCM-UTE</h1>
+            <img class="brand-logo-img" src="assets/ute_logo.png" alt="HCMUTE">
             <p>Trường Đại học Công nghệ Kỹ thuật TP.HCM</p>
           </section>
           <form class="login-card" id="loginForm">
@@ -236,9 +241,6 @@
               <input id="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu">
             </div>
             <button class="portal-button" type="submit">Đăng nhập</button>
-            <button class="google-button" type="button"><span class="google-mark">G</span>Đăng nhập với Google Sinh viên</button>
-            <button class="google-button" type="button"><span class="google-mark">G</span>Đăng nhập với Google Giảng viên</button>
-            <a class="forgot" href="#">Quên mật khẩu</a>
           </form>
           <footer class="login-footer">All Rights Reserved Developed by PSC</footer>
         </main>
@@ -273,7 +275,6 @@
             </div>
             <div class="header-actions">
               <span class="flag" aria-label="Việt Nam">★</span>
-              <span aria-label="Thông báo">🔔</span>
               <button class="header-avatar" id="logoutButton" title="Đăng xuất" aria-label="Đăng xuất"></button>
             </div>
           </header>
@@ -297,7 +298,7 @@
       return `
         <aside class="sidebar" id="sidebar">
           <a class="sidebar-logo" href="#/student" aria-label="Trang chủ sinh viên">
-            <img class="brand-logo-img" src="references/ute_logo.png" alt="HCMUTE">
+            <img class="brand-logo-img" src="assets/ute_logo.png" alt="HCMUTE">
           </a>
           <div class="student-summary">
             <div class="avatar" role="img" aria-label="Ảnh sinh viên"></div>
@@ -331,8 +332,8 @@
         <section class="panel">
           <div class="panel-body">
             <div class="tabs">
-              <button class="tab active" data-tab="general">THÔNG BÁO CHUNG</button>
-              <button class="tab" data-tab="personal">THÔNG BÁO CÁ NHÂN</button>
+              <button class="tab ${activeNotificationTab === "general" ? "active" : ""}" data-tab="general">THÔNG BÁO CHUNG</button>
+              <button class="tab ${activeNotificationTab === "personal" ? "active" : ""}" data-tab="personal">THÔNG BÁO CÁ NHÂN</button>
             </div>
             <div class="toolbar">
               <div class="search-input"><input id="notificationSearch" placeholder="Tìm kiếm thông báo"></div>
@@ -340,7 +341,7 @@
             <div class="table-wrap">
               <table aria-label="Danh sách thông báo">
                 <thead><tr><th>Tiêu đề</th><th>Người gửi</th><th>Thời gian gửi</th></tr></thead>
-                <tbody id="notificationRows">${notificationRows(notifications)}</tbody>
+                <tbody id="notificationRows">${notificationRows(notificationItemsForTab(activeNotificationTab))}</tbody>
               </table>
             </div>
           </div>
@@ -349,7 +350,7 @@
 
     function notificationRows(rows) {
       if (!rows.length) {
-        return `<tr><td colspan="3" class="center">Không tìm thấy thông báo.</td></tr>`;
+        return `<tr><td colspan="3" class="center empty-notification">Hiện tại chưa có thông báo</td></tr>`;
       }
       return rows.map(row => `
         <tr>
@@ -359,32 +360,120 @@
         </tr>`).join("");
     }
 
-    function renderStudentInfo() {
+    function notificationItemsForTab(tab) {
+      return notifications.filter(item => (item.type || "general") === tab);
+    }
+
+    function studentAcademicYears() {
+      return [...new Set(marks.map(row => row.year))]
+        .sort((left, right) => Number(left) - Number(right));
+    }
+
+    function studentSemesters(year) {
+      return [...new Set(
+        marks.filter(row => row.year === year).map(row => row.sem)
+      )].sort((left, right) => Number(left) - Number(right));
+    }
+
+    function studentAcademicChart(year, semester) {
+      const semesterMarks = marks.filter(row =>
+        row.year === year &&
+        row.sem === semester &&
+        row.result !== "Đang học" &&
+        Number.isFinite(Number(row.score10))
+      );
+      if (!semesterMarks.length) {
+        return `<div class="academic-chart-empty">Chưa có kết quả học tập trong học kỳ này</div>`;
+      }
+
+      const average10 = weightedAverage(semesterMarks, "score10");
+      const average4 = weightedAverage(semesterMarks, "score4");
+      const bars = semesterMarks.map(row => {
+        const score = Number(row.score10);
+        const barHeight = Math.max(2, Math.min(100, score * 10));
+        return `
+          <div class="academic-bar-item" title="${row.name}: ${score.toFixed(1)} điểm">
+            <span class="academic-score">${score.toFixed(1)}</span>
+            <span class="academic-bar-column" style="height:${barHeight}%"></span>
+          </div>`;
+      }).join("");
+      const averagePosition = average10 === null ? 0 : Math.max(0, Math.min(100, average10 * 10));
+
       return `
-        <div class="toolbar">
+        <div class="academic-chart-summary">
+          <span>Điểm TB hệ 10: <strong>${formatAverage(average10)}</strong></span>
+          <span>Điểm TB hệ 4: <strong>${formatAverage(average4)}</strong></span>
+        </div>
+        <div class="academic-chart" aria-label="Biểu đồ kết quả học tập ${formatAcademicYear(year)}, học kỳ ${semester}">
+          <div class="academic-average-line" style="bottom:${averagePosition}%">
+            <span>TB ${formatAverage(average10)}</span>
+          </div>
+          ${bars}
+        </div>
+        <div class="academic-chart-legend">
+          <span><i class="legend-line"></i>Điểm trung bình học kỳ</span>
+          <span><i class="legend-bar"></i>Điểm của bạn</span>
+        </div>`;
+    }
+
+    function renderStudentInfo() {
+      const years = studentAcademicYears();
+      const selectedYear = years[0] || "2022";
+      const semesters = studentSemesters(selectedYear);
+      const selectedSemester = semesters[0] || "1";
+      const completedCredits = Math.max(0, Number(student.credits) || 0);
+      const totalCredits = Math.max(0, Number(student.requiredCredits) || completedCredits);
+      const remainingCredits = Math.max(0, totalCredits - completedCredits);
+      const completedPercent = totalCredits
+        ? Math.min(100, completedCredits * 100 / totalCredits)
+        : 0;
+      const completedDegrees = completedPercent * 3.6;
+      const yearOptions = (years.length ? years : [selectedYear])
+        .map(year => `<option value="${year}">${formatAcademicYear(year)}</option>`)
+        .join("");
+      const semesterOptions = (semesters.length ? semesters : [selectedSemester])
+        .map(semester => `<option value="${semester}">Học kỳ ${semester}</option>`)
+        .join("");
+      return `
+        <div class="toolbar academic-toolbar">
           <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
-          <label>Năm học</label><select><option>2026</option><option>2025</option></select>
-          <label>Học kỳ</label><select><option>Học kỳ 2</option><option>Học kỳ 1</option></select>
+          <label>Năm học</label><select id="infoYear">${yearOptions}</select>
+          <label>Học kỳ</label><select id="infoSemester">${semesterOptions}</select>
         </div>
         <section class="student-grid">
           <div class="panel avatar-panel">
             <div class="avatar"></div>
             <div class="student-name">${student.name}</div>
             <div>${student.type} - ${student.id}</div>
-            <button class="portal-button secondary" style="margin-top:10px">Cập nhật thông tin cá nhân</button>
+            <button class="portal-button secondary" style="margin-top:10px">Read only</button>
           </div>
           <div class="panel chart-box">
             <div class="panel-header">Kết quả học tập</div>
-            <p>Điểm trung bình tích lũy: <strong>${student.gpa}</strong></p>
-            <div class="mini-chart" aria-label="Biểu đồ kết quả học tập">
-              <span style="height:58%"></span><span style="height:64%"></span><span style="height:72%"></span><span style="height:61%"></span><span style="height:69%"></span>
-            </div>
+            <div id="studentAcademicChart">${studentAcademicChart(selectedYear, selectedSemester)}</div>
           </div>
-          <div class="panel chart-box">
-            <div class="panel-header">Tiến độ học tập</div>
-            <p>Tín chỉ tích lũy: <strong>${student.credits}/${student.requiredCredits}</strong></p>
-            <div class="bar"><span style="width:100%"></span></div>
-            <p>Đăng ký hiện tại: <strong>${student.currentCredits}</strong> tín chỉ</p>
+          <div class="panel chart-box progress-chart-box">
+            <div class="study-progress-title">
+              <div class="panel-header">Tiến độ học tập</div>
+              <p>Tổng số tín chỉ: <strong>${completedCredits}/${totalCredits}</strong></p>
+            </div>
+            <div class="study-progress-content">
+              <div class="study-progress-legend">
+                <span><i class="progress-completed"></i>Đã học: <b>${completedCredits}</b></span>
+                <span><i class="progress-remaining"></i>Còn lại: <b>${remainingCredits}</b></span>
+              </div>
+              <div
+                class="study-progress-pie"
+                style="--completed-degrees:${completedDegrees}deg"
+                role="img"
+                aria-label="Đã hoàn thành ${completedPercent.toFixed(1)} phần trăm chương trình"
+              >
+                <div class="study-progress-center">
+                  <strong>${completedPercent.toFixed(1)}%</strong>
+                  <span>hoàn thành</span>
+                </div>
+              </div>
+            </div>
+            <p class="current-registration">Đăng ký hiện tại: <strong>${student.currentCredits}</strong> tín chỉ</p>
           </div>
           <div class="panel info-panel">
             <div class="panel-header">Thông tin cơ bản</div>
@@ -423,7 +512,6 @@
       return `
         <div class="toolbar">
           <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
-          <label>Học kỳ</label><select id="termFilter"><option value="">Tất cả</option><option value="1">1</option></select>
         </div>
         ${curriculumTable()}`;
     }
@@ -432,27 +520,27 @@
       const hasStructuredRows = curriculumRows.some(row => row.type && row.type !== "course");
       const rows = hasStructuredRows
         ? curriculumRows.map((row, index) => {
-            if (row.type === "group") return `<tr class="group-pink"><td colspan="12">${row.label}</td></tr>`;
-            if (row.type === "requirement") return `<tr class="group-blue"><td colspan="12">${row.label}</td></tr>`;
+            if (row.type === "group") return `<tr class="group-pink"><td colspan="11">${row.label}</td></tr>`;
+            if (row.type === "requirement") return `<tr class="group-blue"><td colspan="11">${row.label}</td></tr>`;
             return courseRow(row, index);
           })
         : [
-            `<tr class="group-pink"><td colspan="12">Chưa phân học kỳ</td></tr>`,
-            `<tr class="group-blue"><td colspan="12">Bắt buộc</td></tr>`,
+            `<tr class="group-pink"><td colspan="11">Chưa phân học kỳ</td></tr>`,
+            `<tr class="group-blue"><td colspan="11">Bắt buộc</td></tr>`,
             ...curriculumRows.filter(r => r.type === "Bắt buộc" || r.requirement === "Bắt buộc").map(courseRow),
-            `<tr class="group-blue"><td colspan="12">Tự chọn</td></tr>`,
+            `<tr class="group-blue"><td colspan="11">Tự chọn</td></tr>`,
             ...curriculumRows.filter(r => r.type === "Tự chọn" || r.requirement === "Tự chọn").map(courseRow)
           ];
       const body = rows.join("");
       return `
         <div class="table-wrap">
-          <table aria-label="Chương trình đào tạo">
+          <table class="curriculum-table" aria-label="Chương trình đào tạo">
             <thead>
               <tr>
                 <th rowspan="2">STT</th><th rowspan="2">Mã học phần</th><th rowspan="2">Tên học phần</th>
                 <th rowspan="2">Nhóm tự chọn</th><th rowspan="2">Số TC</th><th colspan="2">Số tiết</th>
                 <th rowspan="2">Học phần tiên quyết</th><th rowspan="2">Học phần học trước</th>
-                <th rowspan="2">Học phần tương đương</th><th rowspan="2">Khoa/Bộ môn</th><th rowspan="2">Đề cương</th>
+                <th rowspan="2">Học phần tương đương</th><th class="department-column" rowspan="2">Khoa/Bộ môn</th>
               </tr>
               <tr><th>LT</th><th>TH</th></tr>
             </thead>
@@ -475,60 +563,151 @@
           <td>${row.prerequisite || row.prereq || ""}</td>
           <td>${row.prior || ""}</td>
           <td>${row.equivalent || ""}</td>
-          <td>${row.department || "Công nghệ Thông tin"}</td>
-          <td class="center">${row.outline || ""}</td>
+          <td class="department-column">${row.department || "Công nghệ Thông tin"}</td>
         </tr>`;
     }
 
     function renderMarks() {
+      const yearOptions = [...new Set(marks.map(row => row.year))]
+        .map(year => `<option value="${year}">${formatAcademicYear(year)}</option>`)
+        .join("");
       return `
         <div class="toolbar">
           <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
-          <label>Năm học</label><select id="markYear"><option value="">Tất cả</option><option>2022</option><option>2023</option><option>2026</option></select>
+          <label>Năm học</label><select id="markYear"><option value="">Tất cả</option>${yearOptions}</select>
           <label>Học kỳ</label><select id="markSem"><option value="">Tất cả</option><option>1</option><option>2</option></select>
         </div>
         <div class="table-wrap">
           <table aria-label="Kết quả học tập">
             <thead>
-              <tr><th>STT</th><th>Mã môn học</th><th>Tên môn học</th><th>Số TC</th><th>Điểm hệ 10</th><th>Điểm hệ 4</th><th>Điểm chữ</th><th>Kết quả</th><th>Ghi chú</th><th>Chi tiết</th></tr>
+              <tr><th>STT</th><th>Mã môn học</th><th>Tên môn học</th><th>Số TC</th><th>Điểm hệ 10</th><th>Điểm hệ 4</th><th>Điểm chữ</th><th>Kết quả</th><th>Ghi chú</th></tr>
             </thead>
             <tbody id="marksRows">${marksRows(marks)}</tbody>
           </table>
         </div>`;
     }
 
+    function formatAcademicYear(year) {
+      const startYear = Number(year);
+      return Number.isInteger(startYear) ? `${startYear}-${startYear + 1}` : year;
+    }
+
+    function weightedAverage(rows, scoreKey) {
+      const scoredRows = rows.filter(row =>
+        row.result !== "Đang học" &&
+        row.letter !== "P" &&
+        Number.isFinite(Number(row[scoreKey])) &&
+        Number(row.credits) > 0
+      );
+      const totalCredits = scoredRows.reduce((total, row) => total + Number(row.credits), 0);
+      if (!totalCredits) return null;
+      const weightedTotal = scoredRows.reduce(
+        (total, row) => total + Number(row[scoreKey]) * Number(row.credits),
+        0
+      );
+      return weightedTotal / totalCredits;
+    }
+
+    function accumulatedPassedRows(rows) {
+      const bestPassedAttempt = new Map();
+      rows.filter(row => row.result === "Đạt").forEach(row => {
+        const current = bestPassedAttempt.get(row.code);
+        if (!current || Number(row.score4) > Number(current.score4)) {
+          bestPassedAttempt.set(row.code, row);
+        }
+      });
+      return [...bestPassedAttempt.values()];
+    }
+
+    function formatAverage(value) {
+      return value === null ? "Chưa có" : value.toFixed(2);
+    }
+
+    function semesterSummary(groupRows, cumulativeRows) {
+      const passedRows = groupRows.filter(row => row.result === "Đạt");
+      const passedCredits = passedRows.reduce((total, row) => total + Number(row.credits || 0), 0);
+      const semesterAverage10 = weightedAverage(groupRows, "score10");
+      const semesterAverage4 = weightedAverage(groupRows, "score4");
+      const passedCumulativeRows = accumulatedPassedRows(cumulativeRows);
+      const cumulativeCredits = passedCumulativeRows.reduce(
+        (total, row) => total + Number(row.credits || 0),
+        0
+      );
+      const cumulativeAverage10 = weightedAverage(passedCumulativeRows, "score10");
+      const cumulativeAverage4 = weightedAverage(passedCumulativeRows, "score4");
+
+      return `
+        <tr class="summary-row">
+          <td colspan="9">
+            <div class="semester-summary">
+              <div>
+                <strong>Tổng kết học kỳ</strong>
+                <span> - Số tín chỉ đạt học kỳ: <b>${passedCredits}</b></span>
+                <span> - Điểm TB học kỳ (hệ 10): <b>${formatAverage(semesterAverage10)}</b></span>
+                <span> - Điểm TB học kỳ (hệ 4): <b>${formatAverage(semesterAverage4)}</b></span>
+              </div>
+              <div>
+                <strong>Kết quả tích lũy</strong>
+                <span> - Tổng số tín chỉ tích lũy: <b>${cumulativeCredits}</b></span>
+                <span> - Điểm TB tích lũy (hệ 10): <b>${formatAverage(cumulativeAverage10)}</b></span>
+                <span> - Điểm TB tích lũy (hệ 4): <b>${formatAverage(cumulativeAverage4)}</b></span>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+    }
+
     function marksRows(rows) {
       let html = "";
-      let currentGroup = "";
-      rows.forEach((row, index) => {
-        const group = `${row.year}-${row.sem}`;
-        if (group !== currentGroup) {
-          currentGroup = group;
-          html += `<tr class="group-pink"><td colspan="10">Năm học ${row.year}</td></tr>`;
-          html += `<tr class="group-blue"><td colspan="10">Học kỳ ${row.sem}</td></tr>`;
-        }
-        const failed = row.result === "Không đạt";
-        html += `
-          <tr class="${failed ? "failed-row" : ""}">
-            <td class="center">${index + 1}</td>
-            <td class="center">${row.code}</td>
-            <td>${row.name}</td>
-            <td class="center">${row.credits}</td>
-            <td class="center">${row.score10}</td>
-            <td class="center">${row.score4}</td>
-            <td class="center">${row.letter}</td>
-            <td class="center ${failed ? "status-fail" : "status-pass"}">${failed ? "✕" : "✓"} ${row.result}</td>
-            <td>${row.note}</td>
-            <td class="center">▾</td>
-          </tr>`;
+      let rowNumber = 1;
+      let displayedYear = "";
+      const groupedRows = new Map();
+      rows.forEach(row => {
+        const key = `${row.year}-${row.sem}`;
+        if (!groupedRows.has(key)) groupedRows.set(key, []);
+        groupedRows.get(key).push(row);
       });
-      html += `<tr class="summary-row"><td colspan="10">Tổng số tín chỉ tích lũy: ${student.credits} | Điểm TB tích lũy hệ 4: ${student.gpa}</td></tr>`;
+
+      const allGroupKeys = [...new Set(marks.map(row => `${row.year}-${row.sem}`))];
+      groupedRows.forEach((groupRows, groupKey) => {
+        const { year, sem } = groupRows[0];
+        if (year !== displayedYear) {
+          displayedYear = year;
+          html += `<tr class="group-pink"><td colspan="9">Năm học ${formatAcademicYear(year)}</td></tr>`;
+        }
+        html += `<tr class="group-blue"><td colspan="9">Học kỳ ${sem}</td></tr>`;
+
+        groupRows.forEach(row => {
+          const failed = row.result === "Không đạt";
+          const studying = row.result === "Đang học";
+          const statusClass = failed ? "status-fail" : studying ? "status-pending" : "status-pass";
+          const statusIcon = failed ? "✕" : studying ? "•" : "✓";
+          html += `
+            <tr class="${failed ? "failed-row" : ""}">
+              <td class="center">${rowNumber++}</td>
+              <td class="center">${row.code}</td>
+              <td>${row.name}</td>
+              <td class="center">${row.credits}</td>
+              <td class="center">${row.score10}</td>
+              <td class="center">${row.score4}</td>
+              <td class="center">${row.letter}</td>
+              <td class="center ${statusClass}">${statusIcon} ${row.result}</td>
+              <td>${row.note}</td>
+            </tr>`;
+        });
+
+        const groupIndex = allGroupKeys.indexOf(groupKey);
+        const cumulativeRows = marks.filter(
+          row => allGroupKeys.indexOf(`${row.year}-${row.sem}`) <= groupIndex
+        );
+        html += semesterSummary(groupRows, cumulativeRows);
+      });
+
       return html;
     }
 
     function renderRegistration() {
       return `
-        <p class="course-note">Trang này hiển thị chương trình đào tạo để hỗ trợ tra cứu và hỏi đáp đăng ký học phần qua trợ lý AI. Không thực hiện đăng ký học phần thật.</p>
         <div class="toolbar">
           <label>Chương trình đào tạo</label><select><option>${student.program}</option></select>
         </div>
@@ -570,10 +749,23 @@
     function bindPageEvents(current) {
       if (current === "/student") {
         const input = document.getElementById("notificationSearch");
-        input?.addEventListener("input", () => {
-          const q = input.value.trim().toLowerCase();
-          const rows = notifications.filter(item => item.title.toLowerCase().includes(q));
+        const renderNotificationRows = () => {
+          const q = input?.value.trim().toLowerCase() || "";
+          const rows = notificationItemsForTab(activeNotificationTab).filter(item =>
+            !q || item.title.toLowerCase().includes(q)
+          );
           document.getElementById("notificationRows").innerHTML = notificationRows(rows);
+        };
+        input?.addEventListener("input", renderNotificationRows);
+        document.querySelectorAll(".tab[data-tab]").forEach(tab => {
+          tab.addEventListener("click", () => {
+            activeNotificationTab = tab.dataset.tab;
+            document.querySelectorAll(".tab[data-tab]").forEach(item => {
+              item.classList.toggle("active", item === tab);
+            });
+            if (input) input.value = "";
+            renderNotificationRows();
+          });
         });
       }
       if (current === "/student/studyprograms") {
@@ -584,12 +776,28 @@
           });
         });
       }
+      if (current === "/student/info") {
+        const yearSelect = document.getElementById("infoYear");
+        const semesterSelect = document.getElementById("infoSemester");
+        const updateAcademicChart = () => {
+          document.getElementById("studentAcademicChart").innerHTML =
+            studentAcademicChart(yearSelect.value, semesterSelect.value);
+        };
+        yearSelect?.addEventListener("change", () => {
+          const semesters = studentSemesters(yearSelect.value);
+          semesterSelect.innerHTML = semesters
+            .map(semester => `<option value="${semester}">Học kỳ ${semester}</option>`)
+            .join("");
+          updateAcademicChart();
+        });
+        semesterSelect?.addEventListener("change", updateAcademicChart);
+      }
       if (current === "/student/marks") {
         const filter = () => {
           const y = document.getElementById("markYear").value;
           const s = document.getElementById("markSem").value;
           const rows = marks.filter(row => (!y || row.year === y) && (!s || row.sem === s));
-          document.getElementById("marksRows").innerHTML = rows.length ? marksRows(rows) : `<tr><td colspan="10" class="center">Không có kết quả học tập phù hợp với bộ lọc.</td></tr>`;
+          document.getElementById("marksRows").innerHTML = rows.length ? marksRows(rows) : `<tr><td colspan="9" class="center">Không có kết quả học tập phù hợp với bộ lọc.</td></tr>`;
         };
         document.getElementById("markYear")?.addEventListener("change", filter);
         document.getElementById("markSem")?.addEventListener("change", filter);

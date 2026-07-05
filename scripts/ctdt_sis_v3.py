@@ -934,7 +934,7 @@ def ensure_student_identity_schema(conn: sqlite3.Connection) -> None:
         """
         UPDATE TaiKhoan
         SET
-            AnhDaiDienUrl = COALESCE(AnhDaiDienUrl, '/references/ute_logo.png'),
+            AnhDaiDienUrl = COALESCE(AnhDaiDienUrl, '/assets/ute_logo.png'),
             EmailXacThuc = COALESCE(EmailXacThuc, Email),
             SoDienThoaiXacThuc = COALESCE(
                 SoDienThoaiXacThuc,
