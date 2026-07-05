@@ -15,11 +15,13 @@ DEFAULT_OUTPUT_DB = PROJECT_ROOT / "data" / "ctdt_sis_v3.db"
 CURRENT_YEAR_KEY = "NAM_HOC_HIEN_TAI"
 CURRENT_TERM_KEY = "HOC_KY_HIEN_TAI"
 DYNAMIC_PROFILE_LABELS = ("TRUNG_LICH", "THIEU_TIEN_QUYET", "VUOT_TIN_CHI")
-TARGET_NULL_ACADEMIC_WARNING_RATIO = 0.78
+TARGET_NULL_ACADEMIC_WARNING_RATIO = 0.21
+ACADEMIC_WARNING_RATIO_TOLERANCE = 0.08
 NO_MON_WARNING_DEBT_THRESHOLD = 1
 MIN_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 12
 TARGET_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 15
 MAX_CURRENT_CREDITS_FOR_ACTIVE_STUDENTS = 18
+MAX_HISTORICAL_CREDITS_PER_TERM = 28
 REALISTIC_TOTAL_CREDITS_TO_GRADUATE = 150
 NEAR_GRADUATION_CREDIT_RATIO = 0.85
 CTDT_ID = "CTDT_HCMUTE_CNTT"
@@ -1421,6 +1423,140 @@ def normalize_learning_attempts(conn: sqlite3.Connection) -> None:
     )
 
 
+def normalize_grade_notes(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE KetQuaHocTap
+        SET GhiChu = CASE
+            WHEN LoaiHoc = 'HOC_LAI' THEN 'Học lại'
+            WHEN LoaiHoc = 'CAI_THIEN' THEN 'Học cải thiện'
+            ELSE NULL
+        END
+        """
+    )
+
+
+def remove_same_course_same_term_duplicates(conn: sqlite3.Connection) -> int:
+    duplicate_rows = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT MaSV, MaMH, NamHoc, HocKy, COUNT(*) AS SoDong
+            FROM KetQuaHocTap
+            GROUP BY MaSV, MaMH, NamHoc, HocKy
+            HAVING COUNT(*) > 1
+        )
+        """
+    ).fetchone()[0]
+    conn.execute("DROP TABLE IF EXISTS _v3_keep_kqht_same_term")
+    conn.execute(
+        """
+        CREATE TEMP TABLE _v3_keep_kqht_same_term AS
+        SELECT KetQuaID
+        FROM (
+            SELECT
+                KetQuaID,
+                ROW_NUMBER() OVER (
+                    PARTITION BY MaSV, MaMH, NamHoc, HocKy
+                    ORDER BY
+                        CASE KetQua
+                            WHEN 'DAT' THEN 3
+                            WHEN 'DANG_HOC' THEN 2
+                            ELSE 1
+                        END DESC,
+                        COALESCE(DiemHe4, -1) DESC,
+                        CASE LoaiHoc
+                            WHEN 'HOC_MOI' THEN 3
+                            WHEN 'HOC_LAI' THEN 2
+                            WHEN 'CAI_THIEN' THEN 1
+                            ELSE 0
+                        END DESC,
+                        KetQuaID DESC
+                ) AS rn
+            FROM KetQuaHocTap
+        )
+        WHERE rn = 1
+        """
+    )
+    deleted_rows = conn.execute(
+        """
+        DELETE FROM KetQuaHocTap
+        WHERE KetQuaID NOT IN (
+            SELECT KetQuaID
+            FROM _v3_keep_kqht_same_term
+        )
+        """
+    ).rowcount
+    conn.execute("DROP TABLE _v3_keep_kqht_same_term")
+    return int(deleted_rows if deleted_rows is not None else duplicate_rows)
+
+
+def prune_overloaded_historical_terms(conn: sqlite3.Connection) -> int:
+    deleted_rows = 0
+    while True:
+        overloaded_terms = conn.execute(
+            f"""
+            SELECT
+                kq.MaSV,
+                kq.NamHoc,
+                kq.HocKy,
+                COALESCE(SUM(mh.SoTC), 0) AS TongTinChi
+            FROM KetQuaHocTap kq
+            JOIN MonHoc mh ON mh.MaMH = kq.MaMH
+            WHERE kq.KetQua IN ('DAT', 'KHONG_DAT')
+            GROUP BY kq.MaSV, kq.NamHoc, kq.HocKy
+            HAVING COALESCE(SUM(mh.SoTC), 0) > {MAX_HISTORICAL_CREDITS_PER_TERM}
+            ORDER BY TongTinChi DESC, kq.MaSV, kq.NamHoc, kq.HocKy
+            """
+        ).fetchall()
+        if not overloaded_terms:
+            return deleted_rows
+        for term in overloaded_terms:
+            total_credits = int(term["TongTinChi"] or 0)
+            candidates = conn.execute(
+                """
+                SELECT
+                    kq.KetQuaID,
+                    mh.SoTC,
+                    CASE
+                        WHEN kq.LoaiHoc = 'CAI_THIEN' THEN 100
+                        WHEN kq.GhiChu LIKE 'Bổ sung môn đã đạt%' THEN 95
+                        WHEN kq.GhiChu LIKE 'Lần học đầu đã đạt%' THEN 90
+                        WHEN kq.GhiChu LIKE 'Kịch bản học lại%' THEN 85
+                        WHEN kq.GhiChu LIKE 'Sinh viên %' THEN 80
+                        WHEN kq.KetQua = 'KHONG_DAT' THEN 70
+                        WHEN kq.GhiChu LIKE 'Nhập từ bảng KetQua tổng hợp' THEN 60
+                        WHEN kq.LoaiHoc = 'HOC_LAI' THEN 20
+                        WHEN kq.GhiChu IS NOT NULL THEN 15
+                        ELSE 10
+                    END AS DeletePriority
+                FROM KetQuaHocTap kq
+                JOIN MonHoc mh ON mh.MaMH = kq.MaMH
+                WHERE kq.MaSV = ?
+                  AND kq.NamHoc = ?
+                  AND kq.HocKy = ?
+                  AND kq.KetQua IN ('DAT', 'KHONG_DAT')
+                ORDER BY DeletePriority DESC, mh.SoTC DESC, kq.KetQuaID DESC
+                """,
+                (term["MaSV"], term["NamHoc"], term["HocKy"]),
+            ).fetchall()
+            for candidate in candidates:
+                if total_credits <= MAX_HISTORICAL_CREDITS_PER_TERM:
+                    break
+                conn.execute("DELETE FROM KetQuaHocTap WHERE KetQuaID = ?", (candidate["KetQuaID"],))
+                total_credits -= int(candidate["SoTC"] or 0)
+                deleted_rows += 1
+
+
+def normalize_grade_history(conn: sqlite3.Connection) -> tuple[int, int]:
+    duplicate_deleted_count = remove_same_course_same_term_duplicates(conn)
+    normalize_learning_attempts(conn)
+    overloaded_deleted_count = prune_overloaded_historical_terms(conn)
+    normalize_learning_attempts(conn)
+    normalize_grade_notes(conn)
+    return duplicate_deleted_count, overloaded_deleted_count
+
+
 def next_term(year: int, term: int) -> tuple[int, int]:
     if term == 1:
         return year, 2
@@ -1455,7 +1591,7 @@ def normalize_academic_timeline(conn: sqlite3.Connection) -> tuple[int, int, int
         UPDATE KetQuaHocTap
         SET NamHoc = ?,
             HocKy = ?,
-            GhiChu = 'Bổ sung kết quả học lại đạt để cân bằng dữ liệu nợ môn v3; đã đưa về học kỳ quá khứ hợp lệ.'
+            GhiChu = 'Học lại'
         WHERE KetQua IN ('DAT', 'KHONG_DAT')
           AND (NamHoc > ? OR (NamHoc = ? AND HocKy >= ?))
           AND MaLHP IS NULL
@@ -1662,7 +1798,7 @@ def rebalance_academic_debt(conn: sqlite3.Connection) -> int:
         SELECT
             MaSV, MaMH, NULL, LanHoc, NamHoc, HocKy,
             6.0, 6.0, 6.0, 'C', 2.0,
-            'DAT', 'HOC_LAI', 'Bổ sung kết quả học lại đạt để cân bằng dữ liệu nợ môn v3', ?
+            'DAT', 'HOC_LAI', 'Học lại', ?
         FROM _v3_resolved_attempt
         """,
         (created_at,),
@@ -1999,7 +2135,25 @@ def sync_current_study_rows(conn: sqlite3.Connection) -> int:
                 ) THEN 'HOC_LAI'
                 ELSE 'HOC_MOI'
             END,
-            'Đăng ký hiện tại',
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM KetQuaHocTap prev
+                    WHERE prev.MaSV = dk.MaSV
+                      AND prev.MaMH = lhp.MaMH
+                      AND prev.KetQua = 'DAT'
+                      AND (prev.NamHoc < lhp.NamHoc OR (prev.NamHoc = lhp.NamHoc AND prev.HocKy < lhp.HocKy))
+                ) THEN 'Học cải thiện'
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM KetQuaHocTap prev
+                    WHERE prev.MaSV = dk.MaSV
+                      AND prev.MaMH = lhp.MaMH
+                      AND prev.KetQua = 'KHONG_DAT'
+                      AND (prev.NamHoc < lhp.NamHoc OR (prev.NamHoc = lhp.NamHoc AND prev.HocKy < lhp.HocKy))
+                ) THEN 'Học lại'
+                ELSE NULL
+            END,
             ?
         FROM DangKy dk
         JOIN LopHP lhp ON lhp.MaLHP = dk.MaLHP
@@ -2519,6 +2673,61 @@ def validate(conn: sqlite3.Connection) -> None:
             LEFT JOIN best b ON b.MaSV = k.MaSV AND b.MaMH = k.MaMH
             WHERE b.MaSV IS NULL
         """,
+        "ket_qua_ghi_chu_user_facing": """
+            SELECT KetQuaID, GhiChu
+            FROM KetQuaHocTap
+            WHERE GhiChu IS NOT NULL
+              AND GhiChu NOT IN ('Học lại', 'Học cải thiện')
+        """,
+        "ket_qua_tin_chi_hoc_ky_vuot_28": f"""
+            SELECT
+                kq.MaSV,
+                kq.NamHoc,
+                kq.HocKy,
+                SUM(mh.SoTC) AS TongTinChi
+            FROM KetQuaHocTap kq
+            JOIN MonHoc mh ON mh.MaMH = kq.MaMH
+            GROUP BY kq.MaSV, kq.NamHoc, kq.HocKy
+            HAVING SUM(mh.SoTC) > {MAX_HISTORICAL_CREDITS_PER_TERM}
+        """,
+        "ket_qua_trung_mon_cung_hoc_ky": """
+            SELECT MaSV, MaMH, NamHoc, HocKy, COUNT(*) AS SoDong
+            FROM KetQuaHocTap
+            GROUP BY MaSV, MaMH, NamHoc, HocKy
+            HAVING COUNT(*) > 1
+        """,
+        "hoc_lai_khong_co_lan_rot_truoc": """
+            SELECT cur.KetQuaID
+            FROM KetQuaHocTap cur
+            WHERE cur.LoaiHoc = 'HOC_LAI'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM KetQuaHocTap prev
+                  WHERE prev.MaSV = cur.MaSV
+                    AND prev.MaMH = cur.MaMH
+                    AND prev.KetQua = 'KHONG_DAT'
+                    AND (
+                        prev.NamHoc < cur.NamHoc
+                        OR (prev.NamHoc = cur.NamHoc AND prev.HocKy < cur.HocKy)
+                    )
+              )
+        """,
+        "cai_thien_khong_co_lan_dat_truoc": """
+            SELECT cur.KetQuaID
+            FROM KetQuaHocTap cur
+            WHERE cur.LoaiHoc = 'CAI_THIEN'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM KetQuaHocTap prev
+                  WHERE prev.MaSV = cur.MaSV
+                    AND prev.MaMH = cur.MaMH
+                    AND prev.KetQua = 'DAT'
+                    AND (
+                        prev.NamHoc < cur.NamHoc
+                        OR (prev.NamHoc = cur.NamHoc AND prev.HocKy < cur.HocKy)
+                    )
+              )
+        """,
         "ghi_chu_canh_bao_no_mon_mismatch": """
             SELECT MaSV
             FROM HoSoHocTapSinhVien
@@ -2630,9 +2839,9 @@ def validate(conn: sqlite3.Connection) -> None:
                         FROM HoSoHocTapSinhVien
                         WHERE CanhBaoHocVu IS NULL
                     ) BETWEEN
-                        CAST((SELECT COUNT(*) FROM HoSoHocTapSinhVien) * ({TARGET_NULL_ACADEMIC_WARNING_RATIO} - 0.03) AS INTEGER)
+                        CAST((SELECT COUNT(*) FROM HoSoHocTapSinhVien) * ({TARGET_NULL_ACADEMIC_WARNING_RATIO} - {ACADEMIC_WARNING_RATIO_TOLERANCE}) AS INTEGER)
                         AND
-                        CAST((SELECT COUNT(*) FROM HoSoHocTapSinhVien) * ({TARGET_NULL_ACADEMIC_WARNING_RATIO} + 0.03) AS INTEGER)
+                        CAST((SELECT COUNT(*) FROM HoSoHocTapSinhVien) * ({TARGET_NULL_ACADEMIC_WARNING_RATIO} + {ACADEMIC_WARNING_RATIO_TOLERANCE}) AS INTEGER)
                     THEN 0
                     ELSE 1
                 END
@@ -2673,19 +2882,24 @@ def migrate(db_path: Path) -> None:
         moved_future_synthetic_count, deleted_future_completed_count, deleted_stale_study_count = normalize_academic_timeline(conn)
         recalculate_registration_derived_fields(conn)
         normalize_learning_attempts(conn)
+        normalize_grade_history(conn)
         rebuild_ketqua_summary(conn)
         recalculate_academic_profile_metrics(conn)
         resolved_debt_count = rebalance_academic_debt(conn)
         normalize_learning_attempts(conn)
+        normalize_grade_history(conn)
         rebuild_ketqua_summary(conn)
         recalculate_academic_profile_metrics(conn)
         normalize_student_profiles(conn)
         normalized_graduation_count = normalize_graduation_status(conn)
+        removed_prereq_count += remove_strict_prerequisite_violations(conn)
+        recalculate_registration_derived_fields(conn)
         added_current_registration_count = balance_current_registrations(conn)
         suspended_without_registration_count = suspend_active_students_without_current_registration(conn)
         recalculate_registration_derived_fields(conn)
         synced_current_study_count = sync_current_study_rows(conn)
         normalize_learning_attempts(conn)
+        normalize_grade_notes(conn)
         rebuild_current_registration_view(conn)
         rebuild_registration_eligibility_view(conn)
         upsert_metadata(
