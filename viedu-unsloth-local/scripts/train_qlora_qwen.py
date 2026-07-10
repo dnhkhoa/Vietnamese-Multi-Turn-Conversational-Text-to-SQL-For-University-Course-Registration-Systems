@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -26,10 +27,20 @@ def load_jsonl(path):
         return [json.loads(line) for line in f if line.strip()]
 
 
+def row_to_text(row, tokenizer):
+    if row.get("text"):
+        return row["text"]
+    messages = row.get("messages")
+    if messages:
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    raise ValueError("Each training row must contain either 'text' or 'messages'.")
+
+
 def tokenize_rows(rows, tokenizer, max_seq_length):
     def encode(row):
+        text = row_to_text(row, tokenizer)
         encoded = tokenizer(
-            row["text"],
+            text,
             truncation=True,
             max_length=max_seq_length,
             padding=False,
@@ -89,9 +100,15 @@ def main():
         )
 
     set_seed(int(cfg.get("seed", 3407)))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+
     tokenizer = AutoTokenizer.from_pretrained(cfg["model_name"], trust_remote_code=True, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
     use_eval = bool(args.dev_file and not args.disable_eval and not cfg.get("disable_eval_recommended"))
     train_rows = load_jsonl(args.train_file)
@@ -101,18 +118,20 @@ def main():
 
     quant_config = BitsAndBytesConfig(
         load_in_4bit=bool(cfg.get("load_in_4bit", True)),
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type=cfg.get("bnb_4bit_quant_type", "nf4"),
+        bnb_4bit_use_double_quant=bool(cfg.get("bnb_4bit_use_double_quant", True)),
         bnb_4bit_compute_dtype=torch.float16,
     )
-    print(f"Loading 4-bit model: {cfg['model_name']}")
+    device_map = {"": local_rank} if world_size > 1 else {"": 0}
+    print(f"Loading 4-bit model: {cfg['model_name']} | local_rank={local_rank} world_size={world_size}")
     try:
         model = AutoModelForCausalLM.from_pretrained(
             cfg["model_name"],
             quantization_config=quant_config,
-            device_map={"": 0},
+            device_map=device_map,
             trust_remote_code=True,
             torch_dtype=torch.float16,
+            attn_implementation=cfg.get("attn_implementation", "sdpa"),
         )
         model.config.use_cache = False
         model.gradient_checkpointing_enable()
@@ -149,6 +168,11 @@ def main():
             max_grad_norm=float(cfg["max_grad_norm"]),
             report_to=[],
             seed=int(cfg["seed"]),
+            ddp_find_unused_parameters=False if world_size > 1 else None,
+            remove_unused_columns=False,
+            group_by_length=bool(cfg.get("group_by_length", False)),
+            dataloader_num_workers=int(cfg.get("dataloader_num_workers", 0)),
+            save_safetensors=True,
         )
         trainer = Trainer(
             model=model,
