@@ -150,6 +150,7 @@ def main():
         training_args = TrainingArguments(
             output_dir=str(output_dir / "checkpoints"),
             per_device_train_batch_size=int(cfg["per_device_train_batch_size"]),
+            per_device_eval_batch_size=int(cfg.get("per_device_eval_batch_size", 1)),
             gradient_accumulation_steps=int(cfg["gradient_accumulation_steps"]),
             num_train_epochs=float(cfg["num_train_epochs"]),
             max_steps=args.max_steps if args.max_steps else -1,
