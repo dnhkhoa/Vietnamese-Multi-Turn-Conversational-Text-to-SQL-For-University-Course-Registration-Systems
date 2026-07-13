@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+from src.nl2sql_engine import VietnameseNL2SQLEngine
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -14,6 +18,149 @@ DB_PATH = PROJECT_ROOT / "data" / "ctdt_sis_v3.db"
 CURRICULUM_XLSX_PATH = PROJECT_ROOT / "data" / "CTDT_HCMUTE.xlsx"
 PORTAL_HTML_PATH = PROJECT_ROOT / "hcmute_online_portal_clone.html"
 PORTAL_CSS_PATH = PROJECT_ROOT / "style.css"
+DEFAULT_LORA_PATH = PROJECT_ROOT / "models" / "qwen3b-lora-state-tracking"
+_CHAT_ENGINE: VietnameseNL2SQLEngine | None = None
+
+
+def get_chat_engine() -> VietnameseNL2SQLEngine:
+    global _CHAT_ENGINE
+    if _CHAT_ENGINE is None:
+        parser_mode = os.getenv("NL2SQL_PARSER_MODE", "hybrid")
+        lora_path = Path(os.getenv("NL2SQL_LORA_PATH", str(DEFAULT_LORA_PATH)))
+        _CHAT_ENGINE = VietnameseNL2SQLEngine(
+            DB_PATH,
+            parser_mode=parser_mode,
+            lora_path=lora_path if parser_mode == "hybrid" else None,
+            remote_api_url=os.getenv("NL2SQL_QWEN_API_URL"),
+        )
+    return _CHAT_ENGINE
+
+
+def dataframe_payload(df: Any) -> list[dict[str, Any]]:
+    if df is None or getattr(df, "empty", True):
+        return []
+    return json.loads(df.to_json(orient="records", force_ascii=False))
+
+
+def normalize_question_text(text: str) -> str:
+    replacements = str.maketrans(
+        {
+            "à": "a",
+            "á": "a",
+            "ả": "a",
+            "ã": "a",
+            "ạ": "a",
+            "ă": "a",
+            "ằ": "a",
+            "ắ": "a",
+            "ẳ": "a",
+            "ẵ": "a",
+            "ặ": "a",
+            "â": "a",
+            "ầ": "a",
+            "ấ": "a",
+            "ẩ": "a",
+            "ẫ": "a",
+            "ậ": "a",
+            "đ": "d",
+            "è": "e",
+            "é": "e",
+            "ẻ": "e",
+            "ẽ": "e",
+            "ẹ": "e",
+            "ê": "e",
+            "ề": "e",
+            "ế": "e",
+            "ể": "e",
+            "ễ": "e",
+            "ệ": "e",
+            "ì": "i",
+            "í": "i",
+            "ỉ": "i",
+            "ĩ": "i",
+            "ị": "i",
+            "ò": "o",
+            "ó": "o",
+            "ỏ": "o",
+            "õ": "o",
+            "ọ": "o",
+            "ô": "o",
+            "ồ": "o",
+            "ố": "o",
+            "ổ": "o",
+            "ỗ": "o",
+            "ộ": "o",
+            "ơ": "o",
+            "ờ": "o",
+            "ớ": "o",
+            "ở": "o",
+            "ỡ": "o",
+            "ợ": "o",
+            "ù": "u",
+            "ú": "u",
+            "ủ": "u",
+            "ũ": "u",
+            "ụ": "u",
+            "ư": "u",
+            "ừ": "u",
+            "ứ": "u",
+            "ử": "u",
+            "ữ": "u",
+            "ự": "u",
+            "ỳ": "y",
+            "ý": "y",
+            "ỷ": "y",
+            "ỹ": "y",
+            "ỵ": "y",
+        }
+    )
+    return re.sub(r"\s+", " ", text.lower().translate(replacements)).strip()
+
+
+def question_needs_current_student(question: str) -> bool:
+    norm = normalize_question_text(question)
+    if re.search(r"(?<!\d)\d{8}(?!\d)", norm):
+        return False
+    first_person = any(marker in norm for marker in [" toi ", " cua toi", " minh ", " cua minh", " em ", " cua em"])
+    student_task = any(
+        marker in norm
+        for marker in [
+            "da hoc",
+            "ket qua",
+            "khong dat",
+            "chua dat",
+            "rot",
+            "truot",
+            "da dang ky",
+            "dang ky bao nhieu tin chi",
+            "tong tin chi",
+            "ho so hoc tap",
+            "tien do hoc tap",
+            "canh bao hoc vu",
+        ]
+    )
+    return first_person and student_task
+
+
+def chat_answer(question: str, student_id: str | None = None) -> dict[str, Any]:
+    engine = get_chat_engine()
+    effective_question = question
+    if student_id and question_needs_current_student(question):
+        effective_question = f"{question} của sinh viên {student_id}"
+    result = engine.ask(effective_question)
+    return {
+        "ok": True,
+        "answer": result.message,
+        "rows": dataframe_payload(result.dataframe),
+        "intent": result.intent,
+        "edit_operation": result.edit_operation,
+        "slots": result.slots,
+        "sql": result.sql,
+        "params": result.params,
+        "parser_source": result.parser_source,
+        "parser_warning": result.parser_warning,
+        "warnings": result.warnings,
+    }
 
 
 def connect_db() -> sqlite3.Connection:
@@ -334,7 +481,7 @@ class PortalHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path != "/api/login":
+        if parsed.path not in {"/api/login", "/api/chat"}:
             self.send_json({"ok": False, "error": "NOT_FOUND"}, status=404)
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
@@ -343,6 +490,17 @@ class PortalHandler(BaseHTTPRequestHandler):
             body = json.loads(raw or "{}")
         except json.JSONDecodeError:
             self.send_json({"ok": False, "error": "INVALID_JSON"}, status=400)
+            return
+        if parsed.path == "/api/chat":
+            question = str(body.get("question", "")).strip()
+            student_id = str(body.get("student_id", "")).strip()
+            if not question:
+                self.send_json({"ok": False, "error": "QUESTION_REQUIRED"}, status=400)
+                return
+            try:
+                self.send_json(chat_answer(question, student_id=student_id or None))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=500)
             return
         username = str(body.get("username", "")).strip()
         password = str(body.get("password", ""))

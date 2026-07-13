@@ -50,6 +50,15 @@ def test_reference_resolution_for_prerequisite(engine: VietnameseNL2SQLEngine) -
     assert result.dataframe.empty  # PDF K23 explicitly states "Prerequisites: None" for AI.
 
 
+def test_prerequisite_followup_keeps_primary_course(engine: VietnameseNL2SQLEngine) -> None:
+    engine.ask("M\u00f4n Natural Language Processing c\u1ea7n h\u1ecdc tr\u01b0\u1edbc m\u00f4n g\u00ec?")
+    result = engine.ask("cho t\u00f4i c\u00e1c l\u1edbp m\u00f4n h\u1ecdc n\u00e0y")
+
+    assert result.intent == "COURSE_OFFERING_SEARCH"
+    assert result.slots["MaMH"] == "NLPR431585E"
+    assert set(result.dataframe["TenMH"]) == {"Natural Language Processing"}
+
+
 def test_new_student_query_resets_stale_course_context(engine: VietnameseNL2SQLEngine) -> None:
     engine.ask("Cho tôi xem các lớp môn AI")
     result = engine.ask("Sinh vien 23110001 da dang ky nhung lop nao ky nay?")
@@ -263,6 +272,21 @@ def test_remote_parser_accepts_external_intent_aliases() -> None:
     assert state.intent == "COURSE_OFFERING_SEARCH"
     assert state.edit_operation == "NEW_QUERY"
     assert state.slots["MaMH"] == "DBSY230184E"
+
+
+def test_remote_parser_accepts_student_history_alias() -> None:
+    state = validate_state(
+        {
+            "intent": "STUDENT_REGISTRATION_HISTORY_LOOKUP",
+            "edit_operation": "SEARCH",
+            "slots": {"ma_sv": "22110001", "result": "khong_dat"},
+        }
+    )
+
+    assert state.intent == "STUDENT_RESULT_LOOKUP"
+    assert state.edit_operation == "NEW_QUERY"
+    assert state.slots["MaSV"] == "22110001"
+    assert state.slots["KetQua"] == "KHONG_DAT"
 
 
 def test_remote_parser_repairs_observed_qwen_aliases() -> None:

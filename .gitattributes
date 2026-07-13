@@ -1,2 +1,6 @@
-models/qwen3b-lora-state-tracking/*.safetensors filter=lfs diff=lfs merge=lfs -text
+models/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+viedu-unsloth-local/outputs/adapters/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+viedu-unsloth-local/outputs/adapters/**/*.bin filter=lfs diff=lfs merge=lfs -text
+viedu-unsloth-local/outputs/adapters/**/*.pt filter=lfs diff=lfs merge=lfs -text
+viedu-unsloth-local/outputs/adapters/**/*.pth filter=lfs diff=lfs merge=lfs -text
 *.sh text eol=lf

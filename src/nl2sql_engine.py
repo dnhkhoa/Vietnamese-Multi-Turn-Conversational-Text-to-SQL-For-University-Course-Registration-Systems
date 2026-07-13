@@ -415,10 +415,6 @@ class VietnameseNL2SQLEngine:
             llm_parsed["parser_source"] = "qwen"
             return llm_parsed
         except Exception as exc:
-            if isinstance(exc, StateParserError):
-                self.parser_load_error = str(exc)
-                self.parser_mode = "rule"
-                self.state_parser = None
             rule_parsed["parser_source"] = "rule_fallback"
             rule_parsed["parser_warning"] = str(exc)
             return rule_parsed
@@ -460,6 +456,54 @@ class VietnameseNL2SQLEngine:
     ) -> Dict[str, Any]:
         parsed = validate_state(state)
         slots = dict(parsed.slots)
+        intent = parsed.intent
+        edit_operation = parsed.edit_operation
+
+        if rule_parsed and rule_parsed.get("edit_operation") == "NEW_QUERY":
+            rule_intent = str(rule_parsed.get("intent", ""))
+            rule_slots = dict(rule_parsed.get("slots", {}))
+            if rule_slots:
+                slots = rule_slots
+            norm = normalize_text(user_text)
+            explicit_offering_query = any(
+                marker in norm
+                for marker in [
+                    "liet ke lop",
+                    "liet ke cac lop",
+                    "tim lop",
+                    "cho toi xem cac lop",
+                    "xem cac lop",
+                    "lop hoc phan",
+                    "lop mon",
+                ]
+            ) and not self._has_schedule_marker(norm)
+            if explicit_offering_query or rule_intent in {
+                "COURSE_SCHEDULE_SEARCH",
+                "STUDENT_RESULT_LOOKUP",
+                "STUDENT_REGISTRATION_LOOKUP",
+                "CREDIT_SUMMARY",
+                "REGISTRATION_ELIGIBILITY_CHECK",
+                "PREREQUISITE_LOOKUP",
+            }:
+                intent = rule_intent
+                edit_operation = "NEW_QUERY"
+        elif rule_parsed:
+            rule_intent = str(rule_parsed.get("intent", ""))
+            rule_edit_operation = str(rule_parsed.get("edit_operation", ""))
+            norm = normalize_text(user_text)
+            deterministic_followup = rule_edit_operation in {
+                "ADD_FILTER",
+                "REMOVE_FILTER",
+                "REPLACE_FILTER",
+                "SORT",
+                "LIMIT",
+                "RESOLVE_REFERENCE",
+            }
+            explicit_schedule_query = self._has_schedule_marker(norm) and rule_intent == "COURSE_SCHEDULE_SEARCH"
+            if deterministic_followup or explicit_schedule_query:
+                intent = rule_intent
+                edit_operation = rule_edit_operation
+                slots = dict(rule_parsed.get("slots", slots))
 
         ma_mh = slots.get("MaMH")
         if ma_mh:
@@ -481,8 +525,8 @@ class VietnameseNL2SQLEngine:
                 slots[key] = extracted[key]
 
         return {
-            "intent": parsed.intent,
-            "edit_operation": parsed.edit_operation,
+            "intent": intent,
+            "edit_operation": edit_operation,
             "slots": slots,
         }
 
@@ -734,9 +778,16 @@ class VietnameseNL2SQLEngine:
             "tat ca",
             "tu chon",
             "bat buoc",
+            "hoc",
+            "hoc nay",
+            "hoc do",
+            "hoc kia",
             "nay can hoc truoc mon gi",
         }
         if phrase in generic_phrases:
+            return None
+        first_token = phrase.split(maxsplit=1)[0]
+        if first_token in {"nao", "gi", "cac", "nhung", "hoc"}:
             return None
         if not phrase or len(phrase) < 3:
             return None
@@ -851,9 +902,13 @@ class VietnameseNL2SQLEngine:
         after_reference = r"(?:$|\s+(?:co|thi|la|can|thuoc|may|bao|chua|khong|thieu|yeu|hoc|nam|nay|nua|nhe|gi|sao|dang))"
         reference_patterns = [
             r"\bmon nay\b",
+            r"\bmon hoc nay\b",
             rf"\bmon do{after_reference}",
+            rf"\bmon hoc do{after_reference}",
             r"\blop nay\b",
+            r"\blop hoc phan nay\b",
             rf"\blop do{after_reference}",
+            rf"\blop hoc phan do{after_reference}",
             r"\bsinh vien nay\b",
             rf"\bsinh vien do{after_reference}",
             r"\bban nay\b",
@@ -989,7 +1044,7 @@ class VietnameseNL2SQLEngine:
             return "ACADEMIC_PROFILE_LOOKUP"
         if any(x in norm for x in ["tong tin chi", "bao nhieu tin chi da dang ky", "dang ky bao nhieu tin chi"]):
             return "CREDIT_SUMMARY"
-        if any(x in norm for x in ["ket qua", "da dat", "chua dat", "da qua", "rot", "truot", "qua mon"]):
+        if any(x in norm for x in ["ket qua", "da dat", "chua dat", "khong dat", "da qua", "rot", "truot", "qua mon"]):
             return "STUDENT_RESULT_LOOKUP"
         if any(x in norm for x in ["chuong trinh", "ctdt", "nganh", "bat buoc", "tu chon"]) and "MaNganh" in slots:
             return "CURRICULUM_COURSE_SEARCH"

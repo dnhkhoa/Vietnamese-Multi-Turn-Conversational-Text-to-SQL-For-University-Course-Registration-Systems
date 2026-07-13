@@ -2008,6 +2008,75 @@ def normalize_student_profiles(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE _v3_mon_con_no")
 
 
+def ensure_profile_scenario_coverage(conn: sqlite3.Connection) -> None:
+    scenario_profiles = {
+        "ROT_DAI_CUONG": "Sinh vien tung rot mot so mon dai cuong hoac nen tang.",
+        "ROT_NEN_TANG_CNTT": "Sinh vien tung rot mot so mon nen tang cong nghe thong tin.",
+        "THIEU_TIEN_QUYET": "Sinh vien duoc giu lai de test tinh huong thieu tien quyet.",
+        "TRUNG_LICH": "Sinh vien duoc giu lai de test tinh huong trung lich dang ky.",
+        "VUOT_TIN_CHI": "Sinh vien duoc giu lai de test tinh huong vuot gioi han tin chi.",
+    }
+    candidate_queries = {
+        "ROT_DAI_CUONG": """
+            SELECT MaSV
+            FROM HoSoHocTapSinhVien
+            WHERE SoMonTungRot >= 8 AND NhomHoSo NOT IN ('DIEM_TB_THAP', 'DIEM_TB_CAO')
+            ORDER BY SoMonTungRot DESC, GPA ASC, MaSV
+            LIMIT 1
+        """,
+        "ROT_NEN_TANG_CNTT": """
+            SELECT MaSV
+            FROM HoSoHocTapSinhVien
+            WHERE SoMonTungRot >= 8 AND NhomHoSo NOT IN ('DIEM_TB_THAP', 'DIEM_TB_CAO')
+            ORDER BY SoMonTungRot DESC, GPA DESC, MaSV
+            LIMIT 1 OFFSET 1
+        """,
+        "THIEU_TIEN_QUYET": """
+            SELECT MaSV
+            FROM HoSoHocTapSinhVien
+            WHERE TinChiTichLuy < 90
+            ORDER BY TinChiTichLuy ASC, SoMonTungRot DESC, MaSV
+            LIMIT 1
+        """,
+        "TRUNG_LICH": """
+            SELECT MaSV
+            FROM HoSoHocTapSinhVien
+            WHERE TinChiDangKyHienTai >= 12
+            ORDER BY TinChiDangKyHienTai DESC, SoMonTungRot DESC, MaSV
+            LIMIT 1
+        """,
+        "VUOT_TIN_CHI": """
+            SELECT MaSV
+            FROM HoSoHocTapSinhVien
+            WHERE TinChiDangKyHienTai >= 12
+            ORDER BY (GioiHanTinChi - TinChiDangKyHienTai) ASC, TinChiDangKyHienTai DESC, MaSV
+            LIMIT 1
+        """,
+    }
+    reserved: set[str] = set()
+    for profile, note in scenario_profiles.items():
+        exists = conn.execute(
+            "SELECT 1 FROM HoSoHocTapSinhVien WHERE NhomHoSo = ? LIMIT 1",
+            (profile,),
+        ).fetchone()
+        if exists:
+            continue
+        for row in conn.execute(candidate_queries[profile]).fetchall():
+            ma_sv = row["MaSV"]
+            if ma_sv in reserved:
+                continue
+            conn.execute(
+                """
+                UPDATE HoSoHocTapSinhVien
+                SET NhomHoSo = ?, GhiChu = ?
+                WHERE MaSV = ?
+                """,
+                (profile, note, ma_sv),
+            )
+            reserved.add(ma_sv)
+            break
+
+
 def normalize_graduation_status(conn: sqlite3.Connection) -> int:
     rows = conn.execute(
         """
@@ -2891,6 +2960,7 @@ def migrate(db_path: Path) -> None:
         rebuild_ketqua_summary(conn)
         recalculate_academic_profile_metrics(conn)
         normalize_student_profiles(conn)
+        ensure_profile_scenario_coverage(conn)
         normalized_graduation_count = normalize_graduation_status(conn)
         removed_prereq_count += remove_strict_prerequisite_violations(conn)
         recalculate_registration_derived_fields(conn)

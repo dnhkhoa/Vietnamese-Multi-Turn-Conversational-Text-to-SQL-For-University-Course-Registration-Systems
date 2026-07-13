@@ -1036,6 +1036,21 @@ tbody tr:nth-child(even) td { background: #f8f8f8; }
   background: #e9f4fb;
 }
 
+.agent-meta,
+.agent-warning {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.agent-meta {
+  color: #5d6973;
+}
+
+.agent-warning {
+  color: #9a5b00;
+}
+
 .suggestions {
   display: flex;
   flex-wrap: wrap;
